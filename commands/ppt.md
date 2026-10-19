@@ -1,5 +1,5 @@
 ---
-description: 把 PPT 截图整理成 PDF
+description: 从屏幕录像提取 PPT，整理成课件 PDF
 argument-hint: <课程名、ID 或链接> [课次]
 ---
 
