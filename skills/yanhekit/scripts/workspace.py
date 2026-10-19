@@ -10,6 +10,8 @@ import threading
 import time
 from contextlib import contextmanager
 
+from imageio_ffmpeg import get_ffmpeg_exe
+
 VIEWS = {'classroom': '教室', 'screen': '屏幕'}
 
 
@@ -26,9 +28,8 @@ def replacing(path):
 
 
 def ffmpeg(*args, **kwargs):
-  if not shutil.which('ffmpeg'):
-    raise ValueError('ffmpeg not found; install it and put it on PATH')
-  return subprocess.run(['ffmpeg', '-v', 'error', '-y', *args], check=True, **kwargs)
+  """Run the ffmpeg build that the imageio-ffmpeg package bundles."""
+  return subprocess.run([get_ffmpeg_exe(), '-v', 'error', '-y', *args], check=True, **kwargs)
 
 
 def read_json(path, default):

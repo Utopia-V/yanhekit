@@ -200,5 +200,5 @@ def describe(error):
       name = error.filename
     return f'{error.strerror}: {name}'
   if isinstance(error, subprocess.CalledProcessError):
-    return f'{Path(error.cmd[0]).name} failed with exit status {error.returncode}'
+    return f'ffmpeg failed with exit status {error.returncode}'
   return str(error)

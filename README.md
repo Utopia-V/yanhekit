@@ -6,30 +6,19 @@
 
 ## 安装
 
-需要 [uv](https://docs.astral.sh/uv/) 和 [ffmpeg](https://ffmpeg.org/)。也可以不用 uv，在 Python 3.11+ 虚拟环境中安装脚本头部列出的包。
+可以直接把本仓库地址发给 Agent，按 SKILL.md 的 Setup 章节安装。
 
-直接把本仓库地址发给 Agent，Agent 会自动安装。如果要古法手动安装，使用以下命令：
-
-- Claude Code：
+如果想古法手动安装，首先安装 [uv](https://docs.astral.sh/uv/) 和 [npm](https://nodejs.org/zh-cn/download)，然后通过 SKILL 方式安装：
 
 ```bash
-/plugin marketplace add windlandneko/yanhekit
-/plugin install yanhekit@yanhekit
+npx skills add windlandneko/yanhekit -g
 ```
 
-- Codex：
-
-```bash
-codex plugin marketplace add windlandneko/yanhekit
-```
-
-然后在插件目录或者 GUI 界面中找到并安装。
-
-- 其他 Harness：通过 SKILL 方式安装，即 `npx skills add windlandneko/yanhekit -g`，或把 `skills/yanhekit/` 复制到对应目录。
+或直接把 `skills/yanhekit/` 复制到对应目录，即 `~/.agents/skills`、`~/.dsh/skills`、`~/.codex/skills` 等位置。
 
 ## 使用
 
-在你最喜欢的 Harness 应用（比如 Codex、Claude Desktop、DeepSeek Harness）中打开工作区与 Agent 对话，就可以通过本插件检索材料、整理笔记和回答课程问题了。以后只需打开同一个工作区即可，不同课程和课次的材料会自动归类整理，可以直接点开查看。
+新建一个工作区，直接与 Agent 对话，就可以通过本插件检索材料、整理笔记和PPT、解答课程问题和帮助你期末复习了。以后只需打开同一个工作区即可，不同课程和课次的材料会自动归类整理，可以直接点开文件夹翻阅文档和观看录播。
 
 例如，你可以这么问：
 
@@ -37,7 +26,7 @@ codex plugin marketplace add windlandneko/yanhekit
 - 把昨天的作业帮我做了
 - 明天就要考试了一章没看怎么办，帮帮我
 
-部分 Harness 还可以用斜杠命令直接启动常用流程，或者用自然语言描述同样的任务也可以：
+部分 Harness 还可以用斜杠命令直接启动常用流程：
 
 - `/yanhekit:init <课程>`：整理一门课。先用平台的快速字幕浏览，删掉放假和空课并记入课程总结；再下载录播、转录、批量修正常见错字并嵌入字幕；最后由 subagent 检查 PPT、写课次笔记，汇总成课程总结。之后再运行只处理新课次。
 - `/yanhekit:sync [课程]`：只看平台的快速字幕，查最近课次的点名、作业、考试和通知。
