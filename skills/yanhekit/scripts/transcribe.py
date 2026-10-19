@@ -1,29 +1,42 @@
 """Transcribe lecture recordings with BCut, Bilibili's free speech recognition."""
 
 import json
-import subprocess
 import time
+from functools import partial
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-from client import describe
-from transcript import export, ffmpeg, lecture_folders, recordings, replacing, write_tsv
+from client import FAILURES, describe
+from transcript import write_text
+from workspace import Ticker, count, ffmpeg, log, recordings, replacing, timeline, write_tsv
 
 API = 'https://member.bilibili.com/x/bcut/rubick-interface'
 MODEL = 7
 
 
+class Rejected(RuntimeError):
+  """BCut could not transcribe the audio it was given."""
+
+
 class BCut:
-  def __init__(self):
+  """A BCut client reporting its steps and waits through a Ticker."""
+
+  def __init__(self, ticker):
+    self.ticker = ticker
     self.session = requests.Session()
     self.session.headers['User-Agent'] = 'Mozilla/5.0'
-    retry = Retry(3, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=None)
+    retry = Retry(3, backoff_factor=2, status_forcelist=[500, 502, 503, 504], allowed_methods=None)
     self.session.mount('https://', HTTPAdapter(max_retries=retry))
 
   def call(self, method, path, **kwargs):
-    response = self.session.request(method, API + path, timeout=60, **kwargs)
+    for delay in (30, 60, 120, 240, None):  # 412 is Bilibili's rate limit, which lifts after minutes
+      response = self.session.request(method, API + path, timeout=60, **kwargs)
+      if response.status_code not in (412, 429) or delay is None:
+        break
+      self.ticker.say(f'BCut is rate limiting; retrying in {delay}s')
+      time.sleep(delay)
     response.raise_for_status()
     body = response.json()
     if body['code']:
@@ -39,7 +52,7 @@ class BCut:
         'type': 2,
         'name': audio.name,
         'size': audio.stat().st_size,
-        'resource_file_type': 'mp3',
+        'resource_file_type': 'm4a',
         'model_id': MODEL,
       },
     )
@@ -63,10 +76,10 @@ class BCut:
     return done['download_url']
 
   def transcribe(self, audio, timeout=7200):
-    print('  uploading audio', flush=True)
+    self.ticker.set(f'uploading {audio.stat().st_size / 1e6:.0f} MB of audio to BCut')
     resource = self.upload(audio)
-    print('  transcribing', flush=True)
     task = self.call('POST', '/task', json={'resource': resource, 'model_id': str(MODEL)})['task_id']
+    self.ticker.set('waiting for BCut to transcribe')
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
       result = self.call('GET', '/task/result', params={'model_id': MODEL, 'task_id': task})
@@ -74,48 +87,50 @@ class BCut:
         utterances = json.loads(result['result'])['utterances']
         return [(u['start_time'] / 1000, u['end_time'] / 1000, u['transcript']) for u in utterances]
       if result['state'] == 3:
-        raise RuntimeError(f'BCut task failed: {result.get("remark") or "no reason given"}')
-      time.sleep(5)
+        raise Rejected(f'BCut task failed: {result.get("remark") or "no reason given"}')
+      time.sleep(10)
     raise TimeoutError(f'BCut task {task} still running after {timeout // 60} minutes')
 
 
-def extract_audio(video, audio):
-  audio.parent.mkdir(parents=True, exist_ok=True)
+def extract_audio(video, audio, encode=False):
+  """The recording's sound track as an .m4a file: copied as it is, which takes seconds, or encoded to mono AAC."""
+  codec = ['-ac', '1', '-ar', '16000', '-b:a', '48k'] if encode else ['-c:a', 'copy']
   with replacing(audio) as part:
-    ffmpeg('-i', video, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', part)
+    ffmpeg('-i', video, '-vn', *codec, part)
 
 
-def videos(paths):
-  """One recording a lecture, the classroom view first, from lecture folders, course folders or .mp4 paths."""
-  for path in paths:
-    if path.is_file():
-      yield path
-    else:
-      for lecture in lecture_folders(path):
-        yield from list(recordings(lecture).values())[:1]
+def transcribe_lecture(lecture, overwrite, say):
+  """Transcribe the lecture's first recording into 字幕.txt, reporting through `say`; return whether it failed."""
+  if timeline(lecture, 'transcript').exists() and not overwrite:
+    say('kept existing transcript')
+    return False
+  video = next(iter(recordings(lecture).values()), None)
+  if video is None:
+    say('no recording to transcribe; run `download --classroom` first')
+    return True
+  try:
+    audio = lecture / '.cache' / 'audio.m4a'
+    with Ticker(say) as ticker:
+      if overwrite or not audio.exists():
+        ticker.set(f'copying the sound track of {video.name}')
+        extract_audio(video, audio)
+      bcut = BCut(ticker)
+      try:
+        rows = bcut.transcribe(audio)
+      except Rejected:
+        say('BCut rejected the sound track')
+        ticker.set('encoding the sound track to AAC')
+        extract_audio(video, audio, encode=True)
+        rows = bcut.transcribe(audio)
+    segments = write_tsv(timeline(lecture, 'transcript'), rows)
+    write_text(lecture)
+    say(f'{count(segments, "segment")} in 字幕.txt')
+    return False
+  except FAILURES as error:
+    say(f'transcription failed: {describe(error)}')
+    return True
 
 
-def transcribe(paths, overwrite=False):
-  """Transcribe each recording in turn and export 文字稿.txt and 字幕.srt, printing the outcome; return the failures."""
-  found = list(videos(paths))
-  if not found:
-    raise ValueError('No recordings found')
-  bcut, failed = BCut(), 0
-  for video in found:
-    cache = video.parent / '.cache'
-    print(video.parent.name, flush=True)
-    if (cache / 'transcript.tsv').exists() and not overwrite:
-      print('  kept existing transcript', flush=True)
-      continue
-    try:
-      if overwrite or not (cache / 'audio.mp3').exists():
-        print('  extracting audio', flush=True)
-        extract_audio(video, cache / 'audio.mp3')
-      count = write_tsv(cache / 'transcript.tsv', bcut.transcribe(cache / 'audio.mp3'))
-      for format in ('txt', 'srt'):
-        export(video.parent, format)
-      print(f'  {count} segments in 文字稿.txt and 字幕.srt', flush=True)
-    except (requests.RequestException, OSError, RuntimeError, subprocess.CalledProcessError) as error:
-      failed += 1
-      print(f'  failed: {describe(error)}', flush=True)
-  return failed
+def transcribe(lectures, overwrite=False):
+  """Transcribe the lectures one after another; return how many failed."""
+  return sum(transcribe_lecture(lecture, overwrite, partial(log, lecture)) for lecture in lectures)

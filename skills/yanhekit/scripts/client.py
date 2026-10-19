@@ -2,7 +2,6 @@
 
 import hashlib
 import html
-import json
 import os
 import re
 import socket
@@ -32,6 +31,10 @@ SORTS = {'newest': 'c.created_at desc', 'oldest': 'c.created_at asc', 'popular':
 
 class APIError(Exception):
   pass
+
+
+# What ends a lecture's step, or a command, with a message from `describe` rather than a traceback
+FAILURES = (APIError, OSError, RuntimeError, ValueError, subprocess.CalledProcessError)  # OSError covers requests
 
 
 class Yanhekt:
@@ -137,25 +140,16 @@ class Yanhekt:
   def lecture(self, course_id, sub_id):
     """Duration and playable stream URLs of one replay."""
     data = self.get('/courseapi/v3/portal-home-setting/get-sub-info', course_id=course_id, sub_id=sub_id)['data']
-    ready = {str(v['type']): v['preview_url'] for v in data['video_list'].values() if str(v['status']) == '2'}
+    videos = (data.get('video_list') or {}).values()
+    ready = {str(v['type']): v['preview_url'] for v in videos if str(v['status']) == '2'}
     streams = {name: ready[kind] for name, kind in STREAMS.items() if kind in ready}
     return {'duration_s': float(data['duration']), 'streams': streams}
 
   def subtitles(self, sub_id):
     body = self.get('/courseapi/v3/web-socket/search-trans-result', sub_id=sub_id, format='json')
     segments = (segment for group in body['list'] for segment in group['all_content'])
-    return [(float(s['BeginSec']), float(s['EndSec']), s['Text']) for s in segments]
-
-  def slides(self, course_id, sub_id):
-    """(capture second, image URL) pairs in capture order."""
-    rows, page = [], 1
-    while True:
-      body = self.get('/pptnote/v1/schedule/search-ppt', course_id=course_id, sub_id=sub_id, page=page, per_page=100)
-      rows += body['list']
-      if not body['list'] or len(rows) >= int(body['total']):
-        break
-      page += 1
-    return sorted((float(row['created_sec']), json.loads(row['content'])['pptimgurl']) for row in rows)
+    latest = {float(s['BeginSec']): (float(s['BeginSec']), float(s['EndSec']), s['Text']) for s in segments}
+    return list(latest.values())  # the platform repeats segments in revised versions
 
   def sign(self, url):
     """Replace the `t` query that /play/ media requires; it is bound to the path and the current second."""
@@ -200,7 +194,11 @@ def describe(error):
   if isinstance(error, requests.RequestException):
     return f'Network error: {type(error).__name__}'
   if isinstance(error, OSError) and error.filename:
-    return f'{error.strerror}: {error.filename}'
+    try:
+      name = os.path.relpath(error.filename)
+    except ValueError:  # on another Windows drive
+      name = error.filename
+    return f'{error.strerror}: {name}'
   if isinstance(error, subprocess.CalledProcessError):
     return f'{Path(error.cmd[0]).name} failed with exit status {error.returncode}'
   return str(error)
