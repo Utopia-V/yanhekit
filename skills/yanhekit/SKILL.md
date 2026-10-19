@@ -6,7 +6,7 @@ allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/yanhekit.py *)
 
 # Yanhekit
 
-`<yanhekit>` below is the absolute path of `scripts/yanhekit.py` beside this `SKILL.md`; write it out in each command and run commands from the user's workspace. Only when `uv` is missing or its first run cannot download, turn to [Setup](#setup).
+`<yanhekit>` below is the absolute path of `scripts/yanhekit.py` beside this `SKILL.md`; write it out in each command and run commands from the user's workspace. To install the skills, or when `uv` is missing or its first run cannot download, turn to [Setup](#setup).
 
 Pick the workflow that fits the request. Notes are the product: transcripts only need to be readable enough to work from, so never rewrite them line by line. When a command reports an error, such as HTTP 404 for a recording, pass it on to the user rather than fetching platform URLs yourself, changing the scripts or editing `course.json`.
 
@@ -127,6 +127,17 @@ A class spans two or three 45-minute periods with 5-minute breaks; expect stray 
 Prioritize what is easy to miss: attendance, assignments and deadlines, exam hints, teacher warnings, platform notices and procedural details. By default, map the content with timestamps rather than retelling it, and go deeper when asked. Write only what the transcript, slides, frames or audio support, cite timestamps and images, and mark doubtful passages `需确认`.
 
 ## Setup
+
+To install Yanhekit from its repository, fetch https://github.com/windlandneko/yanhekit with `git clone --depth 1` into a temporary folder, or as https://github.com/windlandneko/yanhekit/archive/refs/heads/main.zip without git. Copy every folder under its `skills/`, names unchanged and replacing older copies, into the user skills directory of the harness you run in:
+
+| Harness | Skills directory | What it adds |
+| --- | --- | --- |
+| Claude Code | `~/.claude/skills` | `/yhkt-init` and the other commands with argument hints; `allowed-tools` approves the script's commands |
+| Codex | `~/.agents/skills` | `$yhkt-init` or `/skills`; `agents/openai.yaml` gives the display name, starter prompt and invocation policy |
+| DeepSeek Harness | `~/.dsh/skills` | the commands in its skill catalog, taking precedence over `~/.agents/skills` |
+| Another harness | its own user skills directory, or else `~/.agents/skills` | |
+
+Then tell the user to start a new session so that the harness loads the skills.
 
 `uv` fetches Python and the script's dependencies on its first run. When the shell does not find `uv`, tell the user and, once they agree, install it with the first of these that works:
 

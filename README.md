@@ -14,7 +14,7 @@
 npx skills add windlandneko/yanhekit -g -s '*'
 ```
 
-或直接把 `skills/` 下的各个文件夹复制到通用位置 `~/.agents/skills`（Codex、DeepSeek Harness 等），Claude Code 则是 `~/.claude/skills`。
+或把 `skills/` 下的各个文件夹复制到所用 Harness 的技能目录：Claude Code 是 `~/.claude/skills`，Codex 是 `~/.agents/skills`，DeepSeek Harness 是 `~/.dsh/skills`。
 
 ## 使用
 
