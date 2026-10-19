@@ -1,6 +1,6 @@
 {
   "name": "yanhekit",
-  "description": "Yanhekt toolkit: download recordings, subtitles and PPT captures, build slide PDFs, transcribe and embed subtitles, and maintain course notes.",
+  "description": "Yanhekt toolkit: download recordings and transcripts, extract slides from screen recordings, build slide PDFs, transcribe and embed subtitles, and maintain course notes.",
   "author": { "name": "windlandneko" },
   "keywords": ["yanhekt", "lecture", "transcript", "notes"]
 }

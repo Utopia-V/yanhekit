@@ -1,7 +1,7 @@
 {
   "name": "yanhekit",
   "version": "1.0.0",
-  "description": "Yanhekt toolkit: download recordings, subtitles and PPT captures, build slide PDFs, transcribe and embed subtitles, and maintain course notes.",
+  "description": "Yanhekt toolkit: download recordings and transcripts, extract slides from screen recordings, build slide PDFs, transcribe and embed subtitles, and maintain course notes.",
   "author": {
     "name": "windlandneko"
   },
@@ -17,7 +17,7 @@
       "interface": {
         "displayName": "Yanhekit",
         "shortDescription": "延河课堂工具包",
-        "longDescription": "下载延河课堂回放、字幕和 PPT 截图，整理课件 PDF，用 BCut 转录并软嵌入字幕，结合课程材料回答问题，维护课程与课次笔记内容。",
+        "longDescription": "下载延河课堂回放和字幕，从屏幕录像提取 PPT 并整理成课件 PDF，用 BCut 转录并软嵌入字幕，结合课程材料回答问题，维护课程与课次笔记内容。",
         "developerName": "windlandneko",
         "category": "Productivity",
         "capabilities": [
@@ -31,7 +31,7 @@
         "defaultPrompt": [
           "XXX 这门课最近留了什么作业，有点名或者重要信息吗？",
           "我需要 XXX 这门课的课件，整理成PDF给我。",
-          "我要开始复习 XXX 这门课程。获取所有录播、字幕和PPT，生成复习笔记和指南。"
+          "我要开始复习 XXX 这门课程。获取所有录播、字幕和 PPT，生成复习笔记和指南。"
         ]
       }
     }
