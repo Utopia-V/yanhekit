@@ -86,7 +86,7 @@ def extract_audio(video, audio):
 
 
 def videos(paths):
-  """One recording a lecture, the teacher view first, from lecture folders, course folders or .mp4 paths."""
+  """One recording a lecture, the classroom view first, from lecture folders, course folders or .mp4 paths."""
   for path in paths:
     if path.is_file():
       yield path

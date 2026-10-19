@@ -1,11 +1,9 @@
-"""Local browser UI for sign-in and downloads; the page follows a shared state over server-sent events."""
+"""Local sign-in page; it follows the sign-in state over server-sent events."""
 
 import json
 import logging
 import os
-import queue
 import secrets
-import shutil
 import threading
 import traceback
 import webbrowser
@@ -16,8 +14,6 @@ from flask import Flask, Response, abort, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.serving import make_server
 
-import download
-import transcript
 from auth import SignIn, SignInError, saved_password, saved_username
 
 UI = Path(__file__).with_name('ui')  # built from ui/ by `pnpm build`
@@ -31,9 +27,6 @@ class State:
     self.values = values
     self.version = self.sent = 0
     self.changed = threading.Condition()
-
-  def __getitem__(self, key):
-    return self.values[key]
 
   def update(self, **values):
     with self.changed:
@@ -64,185 +57,43 @@ def describe(error):
   if isinstance(error, SignInError):
     return str(error)
   traceback.print_exception(error)
-  if isinstance(error, download.NoRecording):
-    return f'没有{transcript.VIEWS[error.view]}视角的录像'
-  if isinstance(error, requests.HTTPError):
-    return f'服务器出错（HTTP {error.response.status_code}），请稍后重试'
   if isinstance(error, requests.RequestException):
     return '网络连接失败，请稍后重试'
   return '出错了，详情见终端'
 
 
-class Stop(Exception):
-  """Raised inside a download that the page paused or cancelled."""
-
-
-class Downloads:
-  """Lectures download one at a time; the page can pause, resume, retry or cancel each one.
-
-  `jobs` maps sub_id to what the page shows: status (queued, running, paused or failed), task, fraction, speed,
-  remaining and error. A lecture leaves it when it finishes or is cancelled.
-  """
-
-  def __init__(self, client, workspace, publish, refresh):
-    self.client, self.workspace = client, workspace
-    self.publish, self.refresh = publish, refresh
-    self.jobs = {}
-    self.orders = {}  # sub_id -> (course, options, lecture folder)
-    self.stop = {}  # sub_id -> pause or cancel, asked of the running lecture
-    self.lock = threading.Lock()
-    self.queue = queue.SimpleQueue()
-    threading.Thread(target=self.work, daemon=True).start()
-
-  def changed(self):
-    self.publish({sub_id: dict(job) for sub_id, job in self.jobs.items()})
-
-  def add(self, course, sub_ids, options):
-    names = {row['sub_id']: download.lecture_id(row['title']) for row in course['replays']}
-    folder = download.course_folder(self.workspace, course)
-    with self.lock:
-      for sub_id in sub_ids:
-        if sub_id not in self.jobs:
-          self.orders[sub_id] = (course, options, folder / names[sub_id])
-          self.jobs[sub_id] = {'status': 'queued'}
-          self.queue.put(sub_id)
-      self.changed()
-
-  def control(self, sub_id, action):
-    with self.lock:
-      job = self.jobs.get(sub_id)
-      if job is None:
-        return
-      if job['status'] == 'running':
-        if action == 'resume':
-          self.stop.pop(sub_id, None)
-        else:
-          self.stop[sub_id] = action
-      elif action == 'cancel':
-        self.discard(sub_id)
-      elif action == 'pause' and job['status'] == 'queued':
-        job['status'] = 'paused'
-      elif action == 'resume' and job['status'] in ('paused', 'failed'):
-        job.update(status='queued', error=None)
-        self.queue.put(sub_id)
-      self.changed()
-
-  def discard(self, sub_id):
-    """Drop a cancelled lecture and the parts its recording left behind."""
-    del self.jobs[sub_id]
-    _, options, lecture = self.orders.pop(sub_id)
-    for view in options['videos']:
-      shutil.rmtree(download.parts(transcript.recording(lecture, view)), ignore_errors=True)
-
-  def work(self):
-    while True:
-      sub_id = self.queue.get()
-      with self.lock:
-        if self.jobs.get(sub_id, {}).get('status') != 'queued':
-          continue  # paused or cancelled while waiting
-        self.jobs[sub_id] = {'status': 'running'}
-        self.changed()
-      self.run(sub_id)
-
-  def run(self, sub_id):
-    course, options, _ = self.orders[sub_id]
-    stopped = error = None
-
-    def check():
-      if sub_id in self.stop:
-        raise Stop
-
-    def report(_, task, fraction=0, speed=None, remaining=None):
-      with self.lock:
-        self.jobs[sub_id].update(task=task, fraction=fraction, speed=speed, remaining=remaining)
-        self.changed()
-
-    try:
-      download.download(self.client, course, self.workspace, [sub_id], **options, report=report, check=check)
-    except Stop:
-      stopped = True
-    except Exception as failure:  # noqa: BLE001 - shown on the page; details stay in the terminal
-      error = describe(failure)
-    with self.lock:
-      action = self.stop.pop(sub_id, None)
-      job = self.jobs[sub_id]
-      if action == 'cancel':
-        self.discard(sub_id)
-      elif stopped and action == 'pause':
-        job.update(status='paused', speed=None, remaining=None)
-      elif stopped:  # resumed before the pause took effect
-        job.update(status='queued')
-        self.queue.put(sub_id)
-      elif error:
-        job.update(status='failed', error=error, speed=None, remaining=None)
-      else:
-        del self.jobs[sub_id]
-        del self.orders[sub_id]
-      self.changed()
-    self.refresh(course)
-
-
-def serve(client, workspace=None, course_id=None):
-  """Without a workspace, return once signed in; otherwise keep the download page open until interrupted."""
+def sign_in(client):
+  """Sign in with the remembered SSO session or the saved password, or else through the local page."""
   username = saved_username()
   state = State(
-    stage='checking',  # checking, credentials, verify or done
+    stage='credentials',  # credentials, verify or done
     username=username,
     saved=bool(saved_password(username)),
     captcha=None,
     phone='',
     sending=False,
     resend_at=0,
-    downloads=workspace is not None,
-    courses=[],
-    course=None,
-    jobs={},
     message='',
   )
   signin = SignIn(client, state.update)
-  signed_in = threading.Event()
-  step_lock = threading.Lock()
+  done = threading.Event()
+  busy = threading.Lock()
 
   def step(action):
-    """Run one sign-in step at a time; finish once it signs in."""
-    if not step_lock.acquire(blocking=False):
+    if not busy.acquire(blocking=False):
       raise SignInError('请稍候')
     try:
       if action():
-        finish()
+        state.update(stage='done', captcha=None)
+        done.set()
     finally:
-      step_lock.release()
+      busy.release()
 
-  def finish():
-    signed_in.set()
-    if workspace is not None:
-      state.update(courses=client.courses())
-      if course_id:
-        show_course(client.course(course_id))
-    state.update(stage='done', captcha=None)
-
-  def show_course(course):
-    """Publish the replay list merged with what course.json records as downloaded."""
-    folder = download.course_folder(workspace, course)
-    lectures = download.lectures(course, download.read_index(folder))
-    summary = {key: course[key] for key in ('id', 'title', 'teacher', 'term')}
-    state.update(course={**summary, 'folder': str(folder.resolve()), 'lectures': lectures})
-
-  def start():
-    try:
-      step(signin.start)
-    except Exception as error:  # noqa: BLE001 - shown on the page; details stay in the terminal
-      state.update(message=describe(error))
-
-  def refresh(course):
-    if state['course'] and state['course']['id'] == course['id']:
-      show_course(course)
-
-  if workspace is not None:
-    downloads = Downloads(client, workspace, lambda jobs: state.update(jobs=jobs), refresh)
-
-  start()  # a saved session or password signs in before any page opens
-  if signed_in.is_set() and workspace is None:
+  try:
+    step(signin.start)
+  except Exception as error:  # noqa: BLE001 - shown on the page; details stay in the terminal
+    state.update(message=describe(error))
+  if done.is_set():
     return
 
   app = Flask(__name__, static_folder=None)
@@ -291,38 +142,12 @@ def serve(client, workspace=None, course_id=None):
     signin.reset()
     return {}
 
-  @app.post('/api/course')
-  def course():
-    if not signed_in.is_set():
-      abort(403)
-    show_course(client.course(request.json['course_id']))
-    return {}
-
-  @app.post('/api/download')
-  def start_download():
-    if not signed_in.is_set() or workspace is None:
-      abort(403)
-    data = request.json
-    course = client.course(data['course_id'])
-    options = ('videos', 'subtitles', 'slides', 'connections', 'overwrite', 'pdf')
-    downloads.add(course, data['sub_ids'], {key: data[key] for key in options})
-    return {}
-
-  @app.post('/api/job')
-  def job():
-    if workspace is None or request.json['action'] not in ('pause', 'resume', 'cancel'):
-      abort(400)
-    downloads.control(request.json['sub_id'], request.json['action'])
-    return {}
-
   logging.getLogger('werkzeug').setLevel(logging.WARNING)
   server = make_server('127.0.0.1', 5174 if DEV else 0, app, threaded=True)
   threading.Thread(target=server.serve_forever, daemon=True).start()
-  page = DEV or f'http://127.0.0.1:{server.port}'
-  url = f'{page}/#{token}'
+  url = f'{DEV or f"http://127.0.0.1:{server.port}"}/#{token}'
   webbrowser.open(url)
-  print(f'{"Download" if workspace else "Sign-in"} page: {url}', flush=True)  # for when no browser opens
-  done = signed_in if workspace is None else threading.Event()  # the download page runs until interrupted
+  print(f'Sign-in page: {url}', flush=True)  # for when no browser opens
   try:
     while not done.wait(1):  # a timeout keeps Ctrl-C working on Windows
       pass

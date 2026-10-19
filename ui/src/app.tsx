@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { AnimatePresence, domAnimation, LazyMotion } from 'motion/react'
+import { domAnimation, LazyMotion } from 'motion/react'
 
 import { post, subscribe, type State } from '@/api'
-import { Courses } from '@/course'
 import { Login } from '@/login'
 
-/** What the app hands each view. */
+/** What the app hands the sign-in card. */
 export interface ViewProps {
   state: State
   /** The action being posted, if any. */
@@ -40,20 +39,13 @@ export function App() {
     }
   }
 
-  // After a sign-in that only needed the session, the server stops on its own.
-  const stopped = closed && !(state?.stage === 'done' && !state.downloads)
+  // The server stops on its own once signed in.
+  const stopped = closed && state?.stage !== 'done'
   const props = state && { state, busy, run, notify: setNotice }
   return (
     <LazyMotion features={domAnimation} strict>
       <main className="flex min-h-svh flex-col items-center justify-center gap-4 px-4 py-10 sm:px-8">
-        <AnimatePresence mode="wait" initial={false}>
-          {props &&
-            (props.state.stage === 'done' && props.state.downloads ? (
-              <Courses key="courses" {...props} />
-            ) : (
-              <Login key="login" {...props} />
-            ))}
-        </AnimatePresence>
+        {props && <Login {...props} />}
         <p role="status" className="min-h-10 max-w-[560px] text-center text-sm text-balance text-muted-foreground">
           {stopped ? '本地服务已停止，请重新运行命令' : notice}
         </p>

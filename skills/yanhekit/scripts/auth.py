@@ -73,7 +73,7 @@ class SignIn:
     self.client, self.publish = client, publish
     self.page = None
     self.username = self.secret = self.phone = ''
-    self.remember = False
+    self.remember = True
     self.resend_at = 0
 
   def request(self, method, url, **kwargs):
@@ -92,23 +92,14 @@ class SignIn:
     return self.client.session.request(method, url, headers=headers, timeout=30, **kwargs)
 
   def start(self):
-    """Sign in with the saved session or password when they still work; otherwise show the password form."""
+    """Sign in with the remembered SSO session, then the saved password, as far as they go without the user."""
     if self.open():
       return True
     username = saved_username()
-    if not saved_password(username):
-      self.publish(stage='credentials')
-      return False
-    try:
-      return self.password(username, '', remember=True)
-    except Exception:
-      self.publish(stage='credentials')
-      raise
+    return self.password(username, '') if saved_password(username) else False
 
   def open(self):
-    """Follow Yanhekt's CAS redirect to the password form; a valid or remembered session signs in instead."""
-    if self.client.authenticate():
-      return True
+    """Follow Yanhekt's CAS redirect to the password form; a remembered SSO session signs in instead."""
     self.page = None
     params = {'r': 'auth/login', 'auType': '', 'tenant_code': 21, 'forward': ORIGIN + '/course'}
     self.request('GET', ORIGIN + '/casapi/index.php', params=params, allow_redirects=False)
@@ -123,7 +114,7 @@ class SignIn:
       raise SignInError('无法识别统一身份认证页面，请稍后重试')
     return False
 
-  def password(self, username, password, captcha='', remember=False):
+  def password(self, username, password, captcha='', remember=True):
     password = password or saved_password(username)
     if not username or not password:
       raise SignInError('请输入学号和密码')
@@ -189,9 +180,8 @@ class SignIn:
     self.publish(sending=True, **values)
     try:
       body = {'phone': self.phone, 'businessNo': '0008'}
-      if (
-        self.request('POST', SSO + '/cas/api/protected/sms/publicNoToken/sendSmsCode', json=body).json()['code'] != 200
-      ):
+      result = self.request('POST', SSO + '/cas/api/protected/sms/publicNoToken/sendSmsCode', json=body).json()
+      if result['code'] != 200:
         raise SignInError('验证码发送失败，请稍后重试')
       self.resend_at = time.time() + 60
     finally:
@@ -222,7 +212,7 @@ class SignIn:
     return True
 
   def reset(self):
-    """Return to the password form, as the page's cancel asks."""
+    """Return to the password form."""
     self.page = None
     self.resend_at = 0
     self.publish(stage='credentials', phone='', sending=False, resend_at=0)

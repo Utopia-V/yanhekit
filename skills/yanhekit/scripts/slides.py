@@ -79,7 +79,7 @@ def similar(lecture, entries, distance=12):
 
 
 def write_pdf(lecture, entries):
-  import img2pdf  # with pikepdf it takes a second to load, so only `pdf` pays for it
+  import img2pdf  # takes a second to load
 
   output = lecture / '课件.pdf'
   output.write_bytes(img2pdf.convert([str(lecture / 'slides' / entry['file']) for entry in entries]))

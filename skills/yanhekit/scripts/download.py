@@ -7,7 +7,6 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from urllib.parse import urlsplit
 
 import m3u8
@@ -17,15 +16,10 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from client import ORIGIN, USER_AGENT
 from slides import write_pdf
-from transcript import ffmpeg, read_captures, read_tsv, recording, recordings, replacing, write_tsv
+from transcript import clock, ffmpeg, read_captures, read_tsv, recording, recordings, replacing, stamp, write_tsv
 
 BLOCK = 8 << 20
-
-
-class NoRecording(ValueError):
-  def __init__(self, lecture, view):
-    super().__init__(f'{lecture}: no {view} recording')
-    self.view = view
+CONNECTIONS = 16
 
 
 def file_name(text):
@@ -62,7 +56,6 @@ def lectures(course, index):
 
 
 def sync_index(course, folder):
-  """Write course.json for the current replay list."""
   index = read_index(folder)
   if index.get('course_id', course['id']) != course['id']:
     raise ValueError(f'{folder} belongs to course {index["course_id"]}')
@@ -75,6 +68,19 @@ def sync_index(course, folder):
   }
   write_json(folder / 'course.json', index)
   return index
+
+
+def holdings(lecture, folder):
+  """What a lecture has: course.json's records of its downloads, then its transcript and notes."""
+  if lecture.get('dropped'):
+    return 'dropped'
+  held = [clock(lecture['duration_s'])] if 'duration_s' in lecture else []
+  held += [f'{lecture[name]} {name}' for name in ('subtitles', 'slides') if name in lecture]
+  held += [f'{view} video' for view in lecture.get('videos', [])]
+  held += [
+    name for name, path in (('transcript', '.cache/transcript.tsv'), ('notes', '笔记.md')) if (folder / path).exists()
+  ]
+  return '  '.join(held)
 
 
 def drop(lecture):
@@ -113,30 +119,29 @@ persistent = retry(
 
 
 class MediaSession(requests.Session):
-  """Signs /play/ requests. `check` runs before each request and between chunks; it raises to stop a download."""
+  """Signs /play/ requests."""
 
-  def __init__(self, client, connections, check=None):
+  def __init__(self, client):
     super().__init__()
     self.client = client
-    self.check = check or (lambda: None)
     self.cookies = client.session.cookies
     self.headers.update({'User-Agent': USER_AGENT, 'Referer': ORIGIN + '/', 'Accept-Encoding': 'identity'})
-    self.mount('https://', HTTPAdapter(pool_maxsize=connections))
+    self.mount('https://', HTTPAdapter(pool_maxsize=CONNECTIONS))
 
   def request(self, method, url, *args, **kwargs):
-    self.check()
     if urlsplit(url).path.startswith('/play/'):
       url = self.client.sign(url)
     return super().request(method, url, *args, **kwargs)
 
 
 class Meter:
-  """Thread-safe progress over `total` parts, reported at most once a second as (fraction, bytes/s, seconds left)."""
+  """Thread-safe progress over `total` parts; with a label, it prints each quarter with the speed and time left."""
 
-  def __init__(self, total, done, report):
-    self.total, self.done, self.report = total, done, report
+  def __init__(self, total, done, label=None):
+    self.total, self.done, self.label = total, done, label
     self.fetched = self.size = 0
-    self.start = self.shown = time.monotonic()
+    self.quarter = done * 4 // total
+    self.start = time.monotonic()
     self.lock = threading.Lock()
 
   def add(self, size, parts=0):
@@ -144,11 +149,12 @@ class Meter:
       self.size += size
       self.done += parts
       self.fetched += parts
-      now = time.monotonic()
-      if now - self.shown >= 1:
-        elapsed, self.shown = now - self.start, now
-        remaining = (self.total - self.done) * elapsed / self.fetched if self.fetched else None
-        self.report(self.done / self.total, self.size / elapsed, remaining)
+      if self.label and self.quarter < self.done * 4 // self.total < 4:
+        self.quarter = self.done * 4 // self.total
+        elapsed = time.monotonic() - self.start
+        left = (self.total - self.done) * elapsed / self.fetched
+        speed = self.size / elapsed / 1e6
+        print(f'  {self.label} {self.done / self.total:.0%}  {speed:.0f} MB/s  {stamp(left)} left', flush=True)
 
 
 def parts(path):
@@ -162,21 +168,22 @@ def fetch(session, meter, url, path, headers=None):
     response.raise_for_status()
     with replacing(path) as part, part.open('wb') as file:
       for chunk in response.iter_content(1 << 18):
-        session.check()
         file.write(chunk)
         meter.add(len(chunk))
 
 
-def fetch_all(session, jobs, connections, report):
+def fetch_all(session, jobs, label=None):
   """Fetch (url, path, headers) jobs in parallel, skipping paths that already exist."""
   missing = [job for job in jobs if not job[1].exists()]
-  meter = Meter(len(jobs), len(jobs) - len(missing), report)
+  if not missing:
+    return
+  meter = Meter(len(jobs), len(jobs) - len(missing), label)
 
   def run(job):
     fetch(session, meter, *job)
     meter.add(0, 1)
 
-  pool = ThreadPoolExecutor(connections)
+  pool = ThreadPoolExecutor(CONNECTIONS)
   try:
     list(pool.map(run, missing))
   finally:
@@ -197,7 +204,7 @@ def content_length(session, url):
     return int(response.headers['Content-Range'].rpartition('/')[2])
 
 
-def download_video(session, url, path, connections, report):
+def download_video(session, url, path, label):
   """Fetch a recording as parts, 8 MiB ranges of an MP4 or the segments of an HLS stream, then join them."""
   folder = parts(path)
   folder.mkdir(parents=True, exist_ok=True)
@@ -206,14 +213,14 @@ def download_video(session, url, path, connections, report):
       size = content_length(session, url)
       spans = [(first, min(first + BLOCK, size) - 1) for first in range(0, size, BLOCK)]
       jobs = [(url, folder / f'{first:012}', {'Range': f'bytes={first}-{last}'}) for first, last in spans]
-      fetch_all(session, jobs, connections, report)
+      fetch_all(session, jobs, label)
       with joined.open('wb') as file:
         for _, piece, _ in jobs:
           file.write(piece.read_bytes())
     else:
       playlist = m3u8.loads(fetch_text(session, url), uri=url)
       jobs = [(segment.absolute_uri, folder / f'{n:05}.ts', None) for n, segment in enumerate(playlist.segments)]
-      fetch_all(session, jobs, connections, report)
+      fetch_all(session, jobs, label)
       for segment, (_, piece, _) in zip(playlist.segments, jobs):
         segment.uri = piece.name
       playlist.dump(folder / 'index.m3u8')
@@ -221,72 +228,65 @@ def download_video(session, url, path, connections, report):
   shutil.rmtree(folder)
 
 
-def download_slides(session, slides, folder, connections, report):
+def download_slides(session, slides, folder):
   """Replace the captures with 001.jpg, 002.jpg and so on, and their times in index.json."""
   shutil.rmtree(folder, ignore_errors=True)
   folder.mkdir(parents=True)
   entries = [{'file': f'{n:03}.jpg', 'time_s': time_s} for n, (time_s, _) in enumerate(slides, 1)]
   jobs = [(url, folder / entry['file'], None) for entry, (_, url) in zip(entries, slides)]
-  fetch_all(session, jobs, connections, report)
+  fetch_all(session, jobs)
   write_json(folder / 'index.json', entries)
 
 
-def download(client, course, workspace, sub_ids=None, *, videos=(), subtitles=False, slides=False, pdf=False,
-             connections=16, overwrite=False, report, check=None):  # fmt: skip
-  """Fetch the selected resources of each lecture, recording them in course.json as they finish.
+def download(client, course, workspace, names=None, *, videos=(), subtitles=False, slides=False, pdf=False,
+             overwrite=False):  # fmt: skip
+  """Fetch the selected resources of each lecture, printing its progress and recording it in course.json.
 
-  `sub_ids` defaults to every lecture not dropped; a dropped lecture named in it is fetched and unmarked.
-  `pdf` combines every saved capture.
-  `report(lecture, task, fraction=0, speed=None, remaining=None)` receives progress; task is subtitles, slides,
-  a view (teacher or screen), pdf or done. `check()` may raise to stop the download; a recording's finished parts are kept.
+  `names` are lecture IDs or sub_ids, by default every lecture not dropped; a named dropped lecture is unmarked.
   """
   if not (videos or subtitles or slides or pdf):
     raise ValueError('Nothing to download; choose --subtitles, --slides, --video or --pdf')
   folder = course_folder(workspace, course)
   index = sync_index(course, folder)
-  if sub_ids is None:
+  if names is None:
     chosen = [lecture for lecture in index['lectures'] if not lecture.get('dropped')]
   else:
-    chosen = [lecture for lecture in index['lectures'] if lecture['sub_id'] in sub_ids]
+    chosen = [lecture for lecture in index['lectures'] if {lecture['id'], lecture['sub_id']} & set(names)]
+    unknown = set(names).difference(*({lecture['id'], lecture['sub_id']} for lecture in chosen))
+    if unknown:
+      raise ValueError(f'Unknown lecture {", ".join(sorted(unknown))}; run `lectures` for the list')
   if not chosen:
     raise ValueError(f'{course["title"]} has no replays to download')
-  session = MediaSession(client, connections, check)
+  session = MediaSession(client)
   for lecture in chosen:
-    name, base = lecture['id'], folder / lecture['id']
+    base = folder / lecture['id']
     base.mkdir(parents=True, exist_ok=True)
     lecture.pop('dropped', None)
+    print(lecture['id'], flush=True)
     if videos or 'duration_s' not in lecture:
       info = client.lecture(course['id'], lecture['sub_id'])
       lecture['duration_s'] = info['duration_s']
     try:
       if subtitles:
-        report(lecture, 'subtitles')
         path = base / '.cache' / 'subtitles.tsv'
         if overwrite or not path.exists():
           write_tsv(path, client.subtitles(lecture['sub_id']))
         lecture['subtitles'] = len(read_tsv(path))
-
       if slides:
-        report(lecture, 'slides')
         if overwrite or not (base / 'slides' / 'index.json').exists():
-          captures = client.slides(course['id'], lecture['sub_id'])
-          download_slides(session, captures, base / 'slides', connections, partial(report, lecture, 'slides'))
+          download_slides(session, client.slides(course['id'], lecture['sub_id']), base / 'slides')
         lecture['slides'] = len(read_captures(base))
-
       for view in videos:
-        report(lecture, view)
         path = recording(base, view)
         if overwrite or not path.exists():
-          url = info['streams'].get(view)
-          if not url:
-            raise NoRecording(name, view)
-          download_video(session, url, path, connections, partial(report, lecture, view))
+          if view not in info['streams']:
+            raise ValueError(f'{lecture["id"]}: no {view} recording')
+          download_video(session, info['streams'][view], path, f'{view} video')
       if pdf and lecture.get('slides'):
-        report(lecture, 'pdf')
         write_pdf(base, read_captures(base))
     finally:
       if videos:
         lecture['videos'] = list(recordings(base))
       write_json(folder / 'course.json', index)  # what finished before a failure is recorded too
-    report(lecture, 'done', 1)
+    print('  ' + holdings(lecture, base), flush=True)
   return folder

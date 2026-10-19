@@ -1,50 +1,12 @@
-export type View = 'teacher' | 'screen'
-
-export interface Lecture {
-  id: string
-  sub_id: string
-  duration_s?: number
-  subtitles?: number
-  slides?: number
-  videos?: View[]
-  dropped?: boolean
-}
-
-export interface CourseSummary {
-  id: string
-  title: string
-  teacher: string
-  term: string
-}
-
-export interface Course extends CourseSummary {
-  folder: string
-  lectures: Lecture[]
-}
-
-/** A lecture in the download queue; it leaves the queue when finished or cancelled. */
-export interface Job {
-  status: 'queued' | 'running' | 'paused' | 'failed'
-  task?: 'subtitles' | 'slides' | View | 'pdf' | 'done'
-  fraction?: number
-  speed?: number | null
-  remaining?: number | null
-  error?: string | null
-}
-
-/** The server's shared state, pushed over /api/events after every change. */
+/** The server's sign-in state, pushed over /api/events after every change. */
 export interface State {
-  stage: 'checking' | 'credentials' | 'verify' | 'done'
+  stage: 'credentials' | 'verify' | 'done'
   username: string
   saved: boolean
   captcha: string | null
   phone: string
   sending: boolean
   resend_at: number
-  downloads: boolean
-  courses: CourseSummary[]
-  course: Course | null
-  jobs: Record<string, Job>
   message: string
 }
 

@@ -8,19 +8,13 @@ import { Spinner } from '@/components/ui/spinner'
 
 export function Card({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
   return (
-    <m.section
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
-      className={cn('w-full overflow-clip rounded-xl border bg-card p-6 shadow-xs max-sm:p-5', className)}
-    >
+    <section className={cn('w-full overflow-clip rounded-xl border bg-card p-6 shadow-xs max-sm:p-5', className)}>
       <header className="relative mb-6 flex items-center justify-center">
         <h1 className="text-2xl font-semibold">{title}</h1>
         <ThemeToggle />
       </header>
       {children}
-    </m.section>
+    </section>
   )
 }
 

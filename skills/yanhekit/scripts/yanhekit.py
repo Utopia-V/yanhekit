@@ -35,53 +35,10 @@ def signed_in():
   upgrade_to_campus()
   client = Yanhekt()
   if not client.authenticate():
-    import server  # Flask and the sign-in stack load only when the page is needed
+    import server
 
-    server.serve(client)
+    server.sign_in(client)
   return client
-
-
-def select(course, lectures):
-  """Map lecture IDs or sub_ids to sub_ids."""
-  known = {download.lecture_id(row['title']): row['sub_id'] for row in course['replays']}
-  unknown = [name for name in lectures if name not in known and name not in known.values()]
-  if unknown:
-    raise ValueError(f'Unknown lecture {", ".join(unknown)}; run `lectures` for the list')
-  return [known.get(name, name) for name in lectures]
-
-
-def holdings(lecture, folder):
-  """What a lecture has: course.json's records of its downloads, then its transcript and notes."""
-  if lecture.get('dropped'):
-    return 'dropped'
-  held = [transcript.clock(lecture['duration_s'])] if 'duration_s' in lecture else []
-  held += [f'{lecture[name]} {name}' for name in ('subtitles', 'slides') if name in lecture]
-  held += [f'{view} video' for view in lecture.get('videos', [])]
-  held += [
-    name for name, path in (('transcript', '.cache/transcript.tsv'), ('notes', '笔记.md')) if (folder / path).exists()
-  ]
-  return '  '.join(held)
-
-
-class Printer:
-  """Download progress for a log: each lecture's ID, each video at every quarter, then what the lecture holds."""
-
-  def __init__(self, folder):
-    self.folder = folder
-    self.lecture, self.task, self.quarter = None, None, 0
-
-  def __call__(self, lecture, task, fraction=0, speed=None, remaining=None):
-    if lecture['id'] != self.lecture:
-      self.lecture = lecture['id']
-      print(lecture['id'], flush=True)
-    if task != self.task:
-      self.task, self.quarter = task, 0
-    if task in STREAMS and self.quarter < int(fraction * 4) < 4:
-      self.quarter = int(fraction * 4)
-      left = f'  {transcript.stamp(remaining)} left' if remaining else ''
-      print(f'  {task} video {fraction:.0%}  {speed / 1e6:.0f} MB/s{left}', flush=True)
-    elif task == 'done':
-      print('  ' + holdings(lecture, self.folder / lecture['id']), flush=True)
 
 
 def course_id(value):
@@ -105,7 +62,7 @@ def absolute(value):
 def parse():
   parser = argparse.ArgumentParser(description=__doc__)
   commands = parser.add_subparsers(dest='command', required=True)
-  commands.add_parser('login', help='Sign in through the local page unless the saved session is still valid')
+  commands.add_parser('login', help='Sign in, opening the local sign-in page only when saved credentials fail')
   listing = commands.add_parser('courses', help='List enrolled courses by term: id, title, teacher')
   listing.add_argument('--term', help='Only this term, such as 2026-2027-1')
   lookup = commands.add_parser('search', help='Search every course on the platform, one page per call')
@@ -124,19 +81,15 @@ def parse():
   chosen.add_argument('-l', '--lecture', action='append', help='Lecture ID or sub_id; repeat it for several')
   chosen.add_argument('--all', action='store_true', help='Every replay of the course except dropped ones')
   fetch.add_argument(
-    '--video', nargs='*', choices=STREAMS, help='Recording views, teacher and screen (default: teacher)'
+    '--video', nargs='*', choices=STREAMS, help='Recording views, classroom and screen (default: classroom)'
   )
   fetch.add_argument('--subtitles', action='store_true', help='Platform subtitles as .cache/subtitles.tsv')
   fetch.add_argument('--slides', action='store_true', help='Timed PPT captures in slides/')
   fetch.add_argument('--pdf', action='store_true', help='Combine every capture into 课件.pdf')
-  fetch.add_argument('--connections', type=int, default=16)
   fetch.add_argument('--overwrite', action='store_true', help='Fetch selected resources again')
   fetch.add_argument('-o', '--output', type=Path, default=Path('.'), help='Workspace (default: current folder)')
   empty = commands.add_parser('drop', help='Delete empty lectures and mark them dropped in course.json')
   empty.add_argument('lectures', nargs='+', type=absolute, help='Lecture folders')
-  page = commands.add_parser('ui', help='Open the download page and keep it running')
-  page.add_argument('course', nargs='?', type=course_id, help='Course to open first')
-  page.add_argument('-o', '--output', type=Path, default=Path('.'), help='Workspace (default: current folder)')
 
   asr = commands.add_parser('transcribe', help='Transcribe recordings with BCut into .cache/transcript.tsv')
   asr.add_argument('paths', nargs='+', type=absolute, help='Lecture folders, course folders or .mp4 recordings')
@@ -158,7 +111,7 @@ def parse():
   attach = commands.add_parser(
     'embed', help='Add a subtitle file to a recording as a soft track, replacing earlier ones'
   )
-  attach.add_argument('video', type=absolute, help='Recording to replace, such as 录播（教室）.mp4')
+  attach.add_argument('video', type=absolute, help='Recording to replace, such as 录播-教室.mp4')
   attach.add_argument('subtitles', type=absolute, help='.srt or .vtt file')
 
   grid = commands.add_parser('sheet', help='Write contact sheets of numbered, timed thumbnails to .cache/')
@@ -181,12 +134,7 @@ def main():
   for stream in (sys.stdout, sys.stderr):
     stream.reconfigure(encoding='utf-8')
   args = parse()
-  if args.command == 'ui':  # the page signs in itself
-    import server
-
-    upgrade_to_campus()
-    server.serve(Yanhekt(), args.output, args.course)
-  elif args.command == 'login':
+  if args.command == 'login':
     signed_in()
     print('Signed in.')
   elif args.command == 'courses':
@@ -207,7 +155,7 @@ def main():
     folder = download.course_folder(args.output, course)
     print(f'{course["title"]}  {course["term"]}  {course["teacher"]}')
     for lecture in download.lectures(course, download.read_index(folder)):
-      print(f'  {lecture["id"]}  {lecture["sub_id"]}  {holdings(lecture, folder / lecture["id"])}'.rstrip())
+      print(f'  {lecture["id"]}  {lecture["sub_id"]}  {download.holdings(lecture, folder / lecture["id"])}'.rstrip())
   elif args.command == 'download':
     client = signed_in()
     course = client.course(args.course)
@@ -215,14 +163,12 @@ def main():
       client,
       course,
       args.output,
-      select(course, args.lecture) if args.lecture else None,
-      videos=() if args.video is None else dict.fromkeys(args.video or ['teacher']),
+      args.lecture,
+      videos=() if args.video is None else dict.fromkeys(args.video or ['classroom']),
       subtitles=args.subtitles,
       slides=args.slides,
       pdf=args.pdf,
-      connections=args.connections,
       overwrite=args.overwrite,
-      report=Printer(download.course_folder(args.output, course)),
     )
     print(f'Saved to {saved}')
   elif args.command == 'drop':

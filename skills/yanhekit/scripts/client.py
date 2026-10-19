@@ -26,7 +26,7 @@ CONFIG = Path.home() / '.config' / 'yanhekit'
 USER_AGENT = (
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 )
-STREAMS = {'teacher': '3', 'screen': '2'}  # video_list[].type
+STREAMS = {'classroom': '3', 'screen': '2'}  # video_list[].type
 SORTS = {'newest': 'c.created_at desc', 'oldest': 'c.created_at asc', 'popular': 'c.click_record_num desc'}
 
 
@@ -187,7 +187,7 @@ def upgrade_to_campus():
       return
     resolve = socket.getaddrinfo  # requests resolves through it; the URL host still sets SNI and certificate checks
     socket.getaddrinfo = lambda name, *args, **kwargs: resolve(CAMPUS_IP if name == host else name, *args, **kwargs)
-    print(f'Campus network: connecting to {host} at {CAMPUS_IP}', file=sys.stderr, flush=True)
+    print(f'Campus network detected, switch to {CAMPUS_IP}.', file=sys.stderr, flush=True)
 
   threading.Thread(target=probe, daemon=True).start()
 

@@ -10,7 +10,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Switch } from '@/components/ui/switch'
 import { Card, EyeIcon, Pending, useCountdown, useHeight } from '@/controls'
 
-const STEPS = { checking: 0, credentials: 0, verify: 1, done: 2 }
+const STEPS = { credentials: 0, verify: 1, done: 2 }
 
 /** One card whose steps slide sideways while its height follows the visible step. */
 export function Login(props: ViewProps) {
@@ -45,9 +45,9 @@ function Credentials({ state, busy, run, notify }: ViewProps) {
   const [username, setUsername] = useState(state.username)
   const [password, setPassword] = useState('')
   const [captcha, setCaptcha] = useState('')
-  const [remember, setRemember] = useState(state.saved)
+  const [remember, setRemember] = useState(true)
   const [visible, setVisible] = useState(false)
-  const locked = state.stage === 'checking' || busy === 'login'
+  const locked = busy === 'login'
 
   function submit(event: FormEvent) {
     event.preventDefault()

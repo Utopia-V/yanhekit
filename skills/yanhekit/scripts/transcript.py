@@ -1,4 +1,4 @@
-"""A lecture's files and timed transcripts: paths shared by the other modules, then query, export and embed."""
+"""A lecture's files and timed transcripts."""
 
 import csv
 import json
@@ -43,17 +43,15 @@ def read_tsv(path):
     return [(float(row['start_s']), float(row['end_s']), row['text']) for row in csv.DictReader(file, delimiter='\t')]
 
 
-FETCH = {'transcript': 'transcribe', 'subtitles': 'download --subtitles'}
-
-
 def timeline(lecture, source):
   path = lecture / '.cache' / f'{source}.tsv'
   if not path.exists():
-    raise ValueError(f'{lecture.name} has no {source}; run `{FETCH[source]}`')
+    command = 'transcribe' if source == 'transcript' else 'download --subtitles'
+    raise ValueError(f'{lecture.name} has no {source}; run `{command}`')
   return read_tsv(path)
 
 
-VIEWS = {'teacher': '教室', 'screen': '屏幕'}
+VIEWS = {'classroom': '教室', 'screen': '屏幕'}
 
 
 def recording(lecture, view):
@@ -61,7 +59,7 @@ def recording(lecture, view):
 
 
 def recordings(lecture):
-  """The saved recordings by view, the teacher view first."""
+  """The saved recordings by view, the classroom view first."""
   return {view: path for view in VIEWS if (path := recording(lecture, view)).exists()}
 
 
