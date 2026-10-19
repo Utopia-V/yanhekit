@@ -122,7 +122,7 @@ export function Courses({ state, busy, run, notify }: ViewProps) {
           <Section title="下载内容">
             <Option
               icon={VideoIcon}
-              title="教师视频"
+              title="教室视频"
               detail="MP4 录像，每节约 1–2 GB"
               checked={teacher}
               onCheckedChange={option('teacher')}
@@ -396,11 +396,13 @@ function Controls({ job, control }: { job: Job; control: RowProps['control'] }) 
 }
 
 function Saved({ lecture }: { lecture: Lecture }) {
-  const badges = [
-    ...(lecture.videos ?? []).map((view) => `${view === 'screen' ? '屏幕' : '教师'}视频`),
-    lecture.subtitles ? '字幕' : '',
-    lecture.slides ? 'PPT' : '',
-  ].filter(Boolean)
+  const badges = lecture.dropped
+    ? ['空课']
+    : [
+        ...(lecture.videos ?? []).map((view) => `${view === 'screen' ? '屏幕' : '教室'}视频`),
+        lecture.subtitles ? '字幕' : '',
+        lecture.slides ? 'PPT' : '',
+      ].filter(Boolean)
   return (
     <span className="flex gap-1">
       {badges.map((badge) => (
@@ -413,7 +415,7 @@ function Saved({ lecture }: { lecture: Lecture }) {
 const tasks = {
   subtitles: '获取字幕',
   slides: '下载 PPT 截图',
-  teacher: '下载教师视频',
+  teacher: '下载教室视频',
   screen: '下载屏幕视频',
   pdf: '合成 PDF',
 }

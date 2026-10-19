@@ -17,7 +17,7 @@ Formats of the files in the workspace layout shown in SKILL.md.
 }
 ```
 
-`lectures` lists every replay in class order. `id` is the lecture ID and folder name, built from the platform title (`2026-9-23第3-5节`), and `sub_id` is the platform's replay ID. The other fields appear once that resource is downloaded: `duration_s`, `subtitles` (segment count), `slides` (capture count) and `videos` (saved views, `teacher`, `screen` or both). A count of 0 means the resource was fetched and is empty.
+`lectures` lists every replay in class order. `id` is the lecture ID and folder name, built from the platform title (`2026-9-23第3-5节`), and `sub_id` is the platform's replay ID. The other fields appear once that resource is downloaded: `duration_s`, `subtitles` (segment count), `slides` (capture count) and `videos` (saved views, `teacher`, `screen` or both). A count of 0 means the resource was fetched and is empty. `"dropped": true` marks an empty lecture whose folder `drop` deleted.
 
 ## Timelines
 
@@ -35,4 +35,4 @@ A capture stays on screen until the next capture's time. `.cache/sheet-001-016.j
 
 ## Unfinished downloads
 
-A name with `.part` before its suffix is a file still being written. `slides/` without `index.json` is fetched again in full. `.cache/录播-教师.pieces/` and `.cache/录播-屏幕.pieces/` hold the finished pieces of an interrupted recording; the next `download` fetches only the missing ones and removes the folder after joining them.
+A name with `.part` before its suffix is a file still being written. `slides/` without `index.json` is fetched again in full. `.cache/录播（教室）.parts/` and `.cache/录播（屏幕）.parts/` hold the finished parts of an interrupted recording; the next `download` fetches only the missing ones and removes the folder after joining them.

@@ -7,6 +7,7 @@ export interface Lecture {
   subtitles?: number
   slides?: number
   videos?: View[]
+  dropped?: boolean
 }
 
 export interface CourseSummary {

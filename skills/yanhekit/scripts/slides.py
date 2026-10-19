@@ -28,6 +28,7 @@ def sheets(lecture, entries, columns=4, rows=4):
   height = width * 9 // 16
   font = ImageFont.load_default(20)
   paths = []
+  (lecture / '.cache').mkdir(exist_ok=True)
   for old in (lecture / '.cache').glob('sheet-*.jpg'):  # sheets of other ranges and layouts
     old.unlink()
   for start in range(0, len(entries), columns * rows):
@@ -43,7 +44,6 @@ def sheets(lecture, entries, columns=4, rows=4):
       draw.text((x + 6, y + 5), label, fill='black', font=font)
     first, last = (entry['file'].removesuffix('.jpg') for entry in (group[0], group[-1]))
     path = lecture / '.cache' / f'sheet-{first}-{last}.jpg'
-    path.parent.mkdir(exist_ok=True)
     sheet.save(path, quality=85)
     paths.append(path)
   return paths
@@ -78,7 +78,7 @@ def similar(lecture, entries, distance=12):
   return [group for group in groups.values() if len(group) > 1]
 
 
-def pdf(lecture, entries):
+def write_pdf(lecture, entries):
   import img2pdf  # with pikepdf it takes a second to load, so only `pdf` pays for it
 
   output = lecture / '课件.pdf'

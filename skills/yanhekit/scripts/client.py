@@ -1,6 +1,5 @@
 """Yanhekt session and course API."""
 
-import argparse
 import hashlib
 import html
 import json
@@ -28,6 +27,7 @@ USER_AGENT = (
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 )
 STREAMS = {'teacher': '3', 'screen': '2'}  # video_list[].type
+SORTS = {'newest': 'c.created_at desc', 'oldest': 'c.created_at asc', 'popular': 'c.click_record_num desc'}
 
 
 class APIError(Exception):
@@ -63,10 +63,13 @@ class Yanhekt:
     os.chmod(CONFIG / 'cookies.txt', 0o600)
     return True
 
-  def get(self, path, **params):
-    response = self.session.get(ORIGIN + path, params=params, timeout=30)
+  def get_json(self, path, headers=None, **params):
+    response = self.session.get(ORIGIN + path, params=params, headers=headers, timeout=30)
     response.raise_for_status()
-    body = response.json()
+    return response.json()
+
+  def get(self, path, headers=None, **params):
+    body = self.get_json(path, headers, **params)
     if body['code'] not in (0, 10002):  # 10002: nothing recorded
       raise APIError(f'{path}: {body.get("msg") or body["code"]}')
     return body
@@ -75,13 +78,8 @@ class Yanhekt:
     """Enrolled courses, newest term first."""
     courses, page = [], 1
     while True:
-      response = self.session.get(
-        ORIGIN + '/vlabpassportapi/v1/account-profile/course',
-        params={'force_mycourse': 1, 'nowpage': page, 'per-page': 100},
-        timeout=30,
-      )
-      response.raise_for_status()
-      result = response.json()['params']['result']
+      params = {'force_mycourse': 1, 'nowpage': page, 'per-page': 100}
+      result = self.get_json('/vlabpassportapi/v1/account-profile/course', **params)['params']['result']
       courses += [
         {'id': str(row['Id']), 'title': html.unescape(row['Title']), 'teacher': row['Teacher'], 'term': row['TermName']}
         for row in result['data']
@@ -89,6 +87,29 @@ class Yanhekt:
       if not result['data'] or len(courses) >= result['total']:
         return courses
       page += 1
+
+  def search(self, keyword='', term=None, college=None, sort=None, page=1, per_page=50):
+    """One page of the platform's course search across every term and college: (total, courses)."""
+    tenant = self.profile['tenant_id']
+    params = {'tenant': tenant, 'title': keyword, 'order': SORTS.get(sort, ''), 'page': page, 'per_page': per_page}
+    if term:
+      terms = self.get_json('/vlabpassportapi/v1/course/term-list')['params']['list']
+      params['term'] = named(terms, 'term_name', term)
+    if college:
+      colleges = self.get_json('/vlabpassportapi/v1/user/structures')['params']['data']
+      params['struc_ids[]'] = named(colleges, 'display_name', college)
+    data = self.get('/courseapi/v3/multi-search/get-course-list', {'tenant-id': str(tenant)}, **params)['data']
+    courses = [
+      {
+        'id': str(row['id']),
+        'title': html.unescape(row['title']),
+        'teacher': row['realname'] or '',
+        'term': row['term_name'],
+        'college': row['kkxy_name'] or '',
+      }
+      for row in data['list']
+    ]
+    return int(data['total']), courses
 
   def course(self, course_id):
     """Course details with its replays in class order."""
@@ -123,8 +144,7 @@ class Yanhekt:
   def subtitles(self, sub_id):
     body = self.get('/courseapi/v3/web-socket/search-trans-result', sub_id=sub_id, format='json')
     segments = (segment for group in body['list'] for segment in group['all_content'])
-    rows = [(float(s['BeginSec']), float(s['EndSec']), ' '.join(s['Text'].split())) for s in segments]
-    return sorted(row for row in rows if row[2])
+    return [(float(s['BeginSec']), float(s['EndSec']), s['Text']) for s in segments]
 
   def slides(self, course_id, sub_id):
     """(capture second, image URL) pairs in capture order."""
@@ -144,6 +164,14 @@ class Yanhekt:
     secret = parts.path + user + str(self.profile['tenant_id']) + str(self.profile['phone'])[::-1] + now
     digest = hashlib.md5(secret.encode()).hexdigest()
     return parts._replace(query=urlencode({'t': f'{user}-{now}-{digest}'})).geturl()
+
+
+def named(rows, key, name):
+  """ID of the row whose `key` equals `name`, listing the choices otherwise."""
+  match = next((row['id'] for row in rows if row[key] == name), None)
+  if match is None:
+    raise ValueError(f'Unknown {name!r}; choose from: {", ".join(row[key] for row in rows)}')
+  return match
 
 
 def upgrade_to_campus():
@@ -172,17 +200,7 @@ def describe(error):
   if isinstance(error, requests.RequestException):
     return f'Network error: {type(error).__name__}'
   if isinstance(error, OSError) and error.filename:
-    return f'{error.strerror}: {os.path.relpath(error.filename)}'
+    return f'{error.strerror}: {error.filename}'
   if isinstance(error, subprocess.CalledProcessError):
     return f'{Path(error.cmd[0]).name} failed with exit status {error.returncode}'
   return str(error)
-
-
-def course_id(value):
-  """Accept a numeric course ID or a coursedetail URL."""
-  if value.isdigit():
-    return value
-  match = re.search(r'[?&]course_id=(\d+)', value)
-  if not match:
-    raise argparse.ArgumentTypeError(f'{value!r} is not a course ID or coursedetail URL; `courses` lists the IDs')
-  return match[1]

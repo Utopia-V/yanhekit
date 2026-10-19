@@ -128,11 +128,11 @@ class Downloads:
       self.changed()
 
   def discard(self, sub_id):
-    """Drop a cancelled lecture and the pieces its recording left behind."""
+    """Drop a cancelled lecture and the parts its recording left behind."""
     del self.jobs[sub_id]
     _, options, lecture = self.orders.pop(sub_id)
     for view in options['videos']:
-      shutil.rmtree(download.pieces(transcript.recording(lecture, view)), ignore_errors=True)
+      shutil.rmtree(download.parts(transcript.recording(lecture, view)), ignore_errors=True)
 
   def work(self):
     while True:
@@ -322,11 +322,10 @@ def serve(client, workspace=None, course_id=None):
   url = f'{page}/#{token}'
   webbrowser.open(url)
   print(f'{"Download" if workspace else "Sign-in"} page: {url}', flush=True)  # for when no browser opens
+  done = signed_in if workspace is None else threading.Event()  # the download page runs until interrupted
   try:
-    if workspace is None:
-      signed_in.wait()
-      state.flush()
-    else:
-      threading.Event().wait()
+    while not done.wait(1):  # a timeout keeps Ctrl-C working on Windows
+      pass
+    state.flush()
   finally:
     server.shutdown()

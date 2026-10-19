@@ -3,7 +3,6 @@
 import json
 import re
 import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -17,8 +16,8 @@ from requests.adapters import HTTPAdapter
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from client import ORIGIN, USER_AGENT
-from slides import pdf as write_pdf
-from transcript import read_captures, read_tsv, recording, recordings, replacing, write_tsv
+from slides import write_pdf
+from transcript import ffmpeg, read_captures, read_tsv, recording, recordings, replacing, write_tsv
 
 BLOCK = 8 << 20
 
@@ -29,14 +28,18 @@ class NoRecording(ValueError):
     self.view = view
 
 
+def file_name(text):
+  return re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', text).strip(' .')
+
+
 def lecture_id(title):
-  """2026-10-8第6-7节 -> 10月08日第6-7节"""
-  _, month, day, periods = re.fullmatch(r'(\d{4})-(\d+)-(\d+)(第.+节)', title).groups()
-  return f'{int(month):02}月{int(day):02}日{periods}'
+  """2026-10-8第6-7节 -> 10月08日第6-7节; another title is kept as a file name."""
+  match = re.fullmatch(r'\d{4}-(\d+)-(\d+)(第.+节)', title)
+  return f'{int(match[1]):02}月{int(match[2]):02}日{match[3]}' if match else file_name(title)
 
 
 def course_folder(workspace, course):
-  return workspace / re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', course['title']).strip(' .')
+  return workspace / file_name(course['title'])
 
 
 def read_index(folder):
@@ -74,6 +77,17 @@ def sync_index(course, folder):
   return index
 
 
+def drop(lecture):
+  """Delete an empty lecture's folder and mark it in course.json, so that `--all` passes over it."""
+  index = read_index(lecture.parent)
+  entry = next((entry for entry in index.get('lectures', []) if entry['id'] == lecture.name), None)
+  if entry is None:
+    raise ValueError(f'{lecture.name} is not a lecture in {lecture.parent.name}/course.json')
+  shutil.rmtree(lecture, ignore_errors=True)
+  entry['dropped'] = True
+  write_json(lecture.parent / 'course.json', index)
+
+
 def transient(error):
   if isinstance(error, requests.HTTPError):
     return error.response.status_code in (403, 408, 429, 500, 502, 503, 504)  # 403: an expired signature
@@ -107,7 +121,7 @@ class MediaSession(requests.Session):
     self.check = check or (lambda: None)
     self.cookies = client.session.cookies
     self.headers.update({'User-Agent': USER_AGENT, 'Referer': ORIGIN + '/', 'Accept-Encoding': 'identity'})
-    self.mount(ORIGIN, HTTPAdapter(pool_maxsize=connections))
+    self.mount('https://', HTTPAdapter(pool_maxsize=connections))
 
   def request(self, method, url, *args, **kwargs):
     self.check()
@@ -117,7 +131,7 @@ class MediaSession(requests.Session):
 
 
 class Meter:
-  """Thread-safe progress over `total` pieces, reported at most once a second as (fraction, bytes/s, seconds left)."""
+  """Thread-safe progress over `total` parts, reported at most once a second as (fraction, bytes/s, seconds left)."""
 
   def __init__(self, total, done, report):
     self.total, self.done, self.report = total, done, report
@@ -125,11 +139,11 @@ class Meter:
     self.start = self.shown = time.monotonic()
     self.lock = threading.Lock()
 
-  def add(self, size, pieces=0):
+  def add(self, size, parts=0):
     with self.lock:
       self.size += size
-      self.done += pieces
-      self.fetched += pieces
+      self.done += parts
+      self.fetched += parts
       now = time.monotonic()
       if now - self.shown >= 1:
         elapsed, self.shown = now - self.start, now
@@ -137,9 +151,9 @@ class Meter:
         self.report(self.done / self.total, self.size / elapsed, remaining)
 
 
-def pieces(path):
-  """Where a recording's finished pieces wait, so that a stopped download resumes."""
-  return path.parent / '.cache' / f'{path.stem}.pieces'
+def parts(path):
+  """Where a recording's finished parts wait, so that a stopped download resumes."""
+  return path.parent / '.cache' / f'{path.stem}.parts'
 
 
 @persistent
@@ -166,7 +180,7 @@ def fetch_all(session, jobs, connections, report):
   try:
     list(pool.map(run, missing))
   finally:
-    pool.shutdown(cancel_futures=True)  # after a failure or an interrupt, start no further pieces
+    pool.shutdown(cancel_futures=True)  # after a failure or an interrupt, start no further parts
 
 
 @persistent
@@ -184,8 +198,8 @@ def content_length(session, url):
 
 
 def download_video(session, url, path, connections, report):
-  """Fetch a recording as pieces, 8 MiB ranges of an MP4 or the segments of an HLS stream, then join them."""
-  folder = pieces(path)
+  """Fetch a recording as parts, 8 MiB ranges of an MP4 or the segments of an HLS stream, then join them."""
+  folder = parts(path)
   folder.mkdir(parents=True, exist_ok=True)
   with replacing(path) as joined:
     if urlsplit(url).path.endswith('.mp4'):
@@ -203,7 +217,7 @@ def download_video(session, url, path, connections, report):
       for segment, (_, piece, _) in zip(playlist.segments, jobs):
         segment.uri = piece.name
       playlist.dump(folder / 'index.m3u8')
-      subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', folder / 'index.m3u8', '-c', 'copy', joined], check=True)
+      ffmpeg('-i', folder / 'index.m3u8', '-c', 'copy', joined)
   shutil.rmtree(folder)
 
 
@@ -217,22 +231,30 @@ def download_slides(session, slides, folder, connections, report):
   write_json(folder / 'index.json', entries)
 
 
-def download(client, course, workspace, sub_ids, *, videos=(), subtitles=False, slides=False, pdf=False,
+def download(client, course, workspace, sub_ids=None, *, videos=(), subtitles=False, slides=False, pdf=False,
              connections=16, overwrite=False, report, check=None):  # fmt: skip
   """Fetch the selected resources of each lecture, recording them in course.json as they finish.
 
+  `sub_ids` defaults to every lecture not dropped; a dropped lecture named in it is fetched and unmarked.
   `pdf` combines every saved capture.
   `report(lecture, task, fraction=0, speed=None, remaining=None)` receives progress; task is subtitles, slides,
-  a view (teacher or screen), pdf or done. `check()` may raise to stop the download; a recording's finished pieces are kept.
+  a view (teacher or screen), pdf or done. `check()` may raise to stop the download; a recording's finished parts are kept.
   """
   if not (videos or subtitles or slides or pdf):
-    raise ValueError('Nothing to download; choose --subtitles, --slides or --video')
+    raise ValueError('Nothing to download; choose --subtitles, --slides, --video or --pdf')
   folder = course_folder(workspace, course)
   index = sync_index(course, folder)
+  if sub_ids is None:
+    chosen = [lecture for lecture in index['lectures'] if not lecture.get('dropped')]
+  else:
+    chosen = [lecture for lecture in index['lectures'] if lecture['sub_id'] in sub_ids]
+  if not chosen:
+    raise ValueError(f'{course["title"]} has no replays to download')
   session = MediaSession(client, connections, check)
-  for lecture in [lecture for lecture in index['lectures'] if lecture['sub_id'] in sub_ids]:
+  for lecture in chosen:
     name, base = lecture['id'], folder / lecture['id']
     base.mkdir(parents=True, exist_ok=True)
+    lecture.pop('dropped', None)
     if videos or 'duration_s' not in lecture:
       info = client.lecture(course['id'], lecture['sub_id'])
       lecture['duration_s'] = info['duration_s']

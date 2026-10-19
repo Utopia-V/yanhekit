@@ -9,7 +9,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from client import describe
-from transcript import recordings, replacing, write_tsv
+from transcript import export, ffmpeg, lecture_folders, recordings, replacing, write_tsv
 
 API = 'https://member.bilibili.com/x/bcut/rubick-interface'
 MODEL = 7
@@ -72,8 +72,7 @@ class BCut:
       result = self.call('GET', '/task/result', params={'model_id': MODEL, 'task_id': task})
       if result['state'] == 4:
         utterances = json.loads(result['result'])['utterances']
-        rows = [(u['start_time'] / 1000, u['end_time'] / 1000, ' '.join(u['transcript'].split())) for u in utterances]
-        return sorted(row for row in rows if row[2])
+        return [(u['start_time'] / 1000, u['end_time'] / 1000, u['transcript']) for u in utterances]
       if result['state'] == 3:
         raise RuntimeError(f'BCut task failed: {result.get("remark") or "no reason given"}')
       time.sleep(5)
@@ -83,9 +82,7 @@ class BCut:
 def extract_audio(video, audio):
   audio.parent.mkdir(parents=True, exist_ok=True)
   with replacing(audio) as part:
-    subprocess.run(
-      ['ffmpeg', '-v', 'error', '-y', '-i', video, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', part], check=True
-    )
+    ffmpeg('-i', video, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', part)
 
 
 def videos(paths):
@@ -93,13 +90,13 @@ def videos(paths):
   for path in paths:
     if path.is_file():
       yield path
-    else:  # a lecture folder, or a course folder of them; a missing path raises here
-      for lecture in [path, *sorted(path.iterdir())]:
+    else:
+      for lecture in lecture_folders(path):
         yield from list(recordings(lecture).values())[:1]
 
 
 def transcribe(paths, overwrite=False):
-  """Transcribe each recording in turn, printing its lecture and outcome; return how many failed."""
+  """Transcribe each recording in turn and export 文字稿.txt and 字幕.srt, printing the outcome; return the failures."""
   found = list(videos(paths))
   if not found:
     raise ValueError('No recordings found')
@@ -114,9 +111,10 @@ def transcribe(paths, overwrite=False):
       if overwrite or not (cache / 'audio.mp3').exists():
         print('  extracting audio', flush=True)
         extract_audio(video, cache / 'audio.mp3')
-      rows = bcut.transcribe(cache / 'audio.mp3')
-      write_tsv(cache / 'transcript.tsv', rows)
-      print(f'  {len(rows)} segments', flush=True)
+      count = write_tsv(cache / 'transcript.tsv', bcut.transcribe(cache / 'audio.mp3'))
+      for format in ('txt', 'srt'):
+        export(video.parent, format)
+      print(f'  {count} segments in 文字稿.txt and 字幕.srt', flush=True)
     except (requests.RequestException, OSError, RuntimeError, subprocess.CalledProcessError) as error:
       failed += 1
       print(f'  failed: {describe(error)}', flush=True)
