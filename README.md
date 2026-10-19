@@ -11,10 +11,10 @@
 如果想古法手动安装，首先安装 [uv](https://docs.astral.sh/uv/) 和 [npm](https://nodejs.org/zh-cn/download)，然后通过 SKILL 方式安装：
 
 ```bash
-npx skills add windlandneko/yanhekit -g
+npx skills add windlandneko/yanhekit -g -s '*'
 ```
 
-或直接把 `skills/yanhekit/` 复制到对应目录，即 `~/.agents/skills`、`~/.dsh/skills`、`~/.codex/skills` 等位置。
+或直接把 `skills/` 下的各个文件夹复制到通用位置 `~/.agents/skills`（Codex、DeepSeek Harness 等），Claude Code 则是 `~/.claude/skills`。
 
 ## 使用
 
@@ -26,12 +26,12 @@ npx skills add windlandneko/yanhekit -g
 - 把昨天的作业帮我做了
 - 明天就要考试了一章没看怎么办，帮帮我
 
-部分 Harness 还可以用斜杠命令直接启动常用流程：
+还可以直接调用命令技能启动常用流程：Claude Code 输入 `/yhkt-init`，Codex 输入 `$yhkt-init`，其他 Harness 在技能列表中选择。这些技能只在你调用时运行。
 
-- `/yanhekit:init <课程>`：整理一门课。先用平台的快速字幕浏览，删掉放假和空课并记入课程总结；再下载录播、转录、批量修正常见错字并嵌入字幕；最后由 subagent 检查 PPT、写课次笔记，汇总成课程总结。之后再运行只处理新课次。
-- `/yanhekit:sync [课程]`：只看平台的快速字幕，查最近课次的点名、作业、考试和通知。
-- `/yanhekit:ppt <课程> [课次]`：从屏幕录像提取 PPT，整理成去重后的课件 PDF。
-- `/yanhekit:review <课程> [范围]`：根据笔记写复习提纲和自测题。
+- `yhkt-init <课程>`：整理一门课。先用平台的快速字幕浏览，删掉放假和空课并记入课程总结；再下载录播、转录、批量修正常见错字并嵌入字幕；最后由 subagent 检查 PPT、写课次笔记，汇总成课程总结。之后再运行只处理新课次。
+- `yhkt-sync [课程]`：只看平台的快速字幕，查最近课次的点名、作业、考试和通知。
+- `yhkt-ppt <课程> [课次]`：从屏幕录像提取 PPT，整理成去重后的课件 PDF。
+- `yhkt-review <课程> [范围]`：根据笔记写复习提纲和自测题。
 
 ## 技术细节
 

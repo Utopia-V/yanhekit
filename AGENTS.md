@@ -5,7 +5,7 @@
 - `README.md`、`AGENTS.md` 和笔记模板使用中文；`SKILL.md` 和 `references/` 等内容均使用简洁的英文。
 - 每个正文段落写在同一行，让显示工具自动换行，不用手动断行。
 - 以最新、唯一版本的口吻描述完整功能，让文档与当前实现保持同步，不要有歧义或旧信息。用正向、直接的表述说明行为和用途，不要在段落末尾添加多余内容，如辩解性的内容、删去也不影响内容的文字等。
-- 目录与文件名称简短、直观，README 写安装和产品决策，`SKILL.md` 写 Agent 的命令与流程，`commands/` 写斜杠命令（中文描述、英文正文，只指向 `SKILL.md` 的流程），`references/files.md` 写文件格式，`references/notes.md` 写笔记模板，本文件写开发约束与代码结构。
+- 目录与文件名称简短、直观，README 写安装和产品决策，`SKILL.md` 写 Agent 的命令与流程，`skills/yhkt-*/` 写只供用户调用的命令技能（中文描述、英文正文，只指向 `SKILL.md` 的流程，用 `disable-model-invocation` 和 `agents/openai.yaml` 关闭自动调用），`references/files.md` 写文件格式，`references/notes.md` 写笔记模板，本文件写开发约束与代码结构。
 
 ## 实现范围
 
