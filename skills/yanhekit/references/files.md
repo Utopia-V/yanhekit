@@ -19,7 +19,9 @@
 
 ## Timelines
 
-`.cache/fast-transcript.tsv` holds the platform's fast transcript and `.cache/transcript.tsv` the BCut transcript, tab-separated with a `start_s`, `end_s`, `text` header and rows ordered by start. `字幕.txt` is written from `transcript.tsv`, one `[00:02:30] text` line per segment.
+`.cache/fast-transcript.tsv` holds the platform's fast transcript and `.cache/transcript.tsv` the completed transcript from BCut or the local engine, tab-separated with a `start_s`, `end_s`, `text` header and rows ordered by start. `字幕.txt` is written from `transcript.tsv`, one `[00:02:30] text` line per segment.
+
+`.cache/local-asr.json` holds resumable local ASR rows, the decoded sample offset, completion state, active runtime and a signature of the recording, model contents, hotwords and runtime options. It is published atomically after each chunk; the final `transcript.tsv` and `字幕.txt` appear after all audio is processed. Audio is decoded in RAM.
 
 ## Slides
 

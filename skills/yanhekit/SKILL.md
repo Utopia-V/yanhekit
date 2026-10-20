@@ -1,6 +1,6 @@
 ---
 name: yanhekit
-description: Download Yanhekt (延河课堂, aita.yanhekt.cn) lecture recordings and transcripts, extract slides from screen recordings, build slide PDFs, transcribe with BCut, embed subtitles, and maintain course notes or answer questions from the material. Use for Yanhekt course links, BIT lecture replays, local lecture recordings, and requests for lecture transcripts, slides, study notes, review outlines or course questions.
+description: Download Yanhekt (延河课堂, aita.yanhekt.cn) lecture recordings and transcripts, extract slides from screen recordings, build slide PDFs, transcribe with BCut or an optional local engine, embed subtitles, and maintain course notes or answer questions from the material. Use for Yanhekt course links, BIT lecture replays, local lecture recordings, and requests for lecture transcripts, slides, study notes, review outlines or course questions.
 allowed-tools: Bash(uv run ${CLAUDE_SKILL_DIR}/scripts/yanhekit.py *)
 ---
 
@@ -25,7 +25,7 @@ Pick the workflow that fits the request. Notes are the product: transcripts only
     课件.pdf            slides
     slides/            index.json and numbered slides: 001.jpg, 002.jpg, …
     frames/            frames taken at given times: 教室-00-41-20.jpg, …
-    .cache/            fast-transcript.tsv, transcript.tsv, audio.m4a, sheet-001-016.jpg
+    .cache/            fast-transcript.tsv, transcript.tsv, local-asr.json, audio.m4a, sheet-001-016.jpg
 ```
 
 Commands take targets: a course folder stands for its lectures not dropped, and `--latest N` narrows it to the last N; a lecture folder stands for itself, and `download` also takes one not yet created, named `<course folder>/<lecture ID>` as `status` lists it. [references/files.md](references/files.md) gives the file formats and [references/notes.md](references/notes.md) the note templates.
@@ -95,17 +95,21 @@ A recording is 2–3 GB, so run downloads of recordings and slides in the backgr
 ### Transcripts
 
 ```sh
-uv run <yanhekit> transcribe <target>... [--latest N] [--overwrite]
+uv run <yanhekit> transcribe <target>... [--latest N] [--engine bcut|local] [--hotwords FILE] [--device cuda|cpu] [--batch-seconds N] [--overwrite]
 uv run <yanhekit> replace <target>... -r <wrong> <right> [-r <wrong> <right>]...
 uv run <yanhekit> embed <target>... [--file <subtitles>]
 uv run <yanhekit> query <target>... [--latest N] [--fast-transcript] [-m 流水线] [--start 2:30] [--end 5:00]
 ```
 
-`transcribe` uploads the sound track of each lecture's recording to Bilibili’s BCut service, one lecture at a time, and writes `字幕.txt`; lectures with a transcript are skipped. A recording from elsewhere works too, saved as `录播-教室.mp4` in a lecture folder of its own.
+`transcribe` defaults to BCut and uploads the sound track of each lecture's recording to Bilibili’s BCut service, one lecture at a time, and writes `字幕.txt`; lectures with a transcript are skipped. A recording from elsewhere works too, saved as `录播-教室.mp4` in a lecture folder of its own.
+
+`transcribe --engine local` runs SeACo-Paraformer-large with FSMN VAD and punctuation on the local machine. It launches `local_asr.py` in a separate uv environment, keeping PyTorch out of the main script's dependencies. First use downloads dependencies and models from ModelScope; audio and recognized text stay local. `--hotwords FILE` reads one phrase per UTF-8 line, preserving spaces within a phrase. Hotwords bias recognition rather than guaranteeing correct spelling. The default is NVIDIA CUDA with the bundled PyTorch CUDA 12.8 runtime and a compatible driver; `--device cpu` selects CPU inference. The default `--batch-seconds 60` limits audio batched by FunASR; lower it on smaller GPUs. PyTorch's allocator is capped at 18 GiB, excluding CUDA library and display allocations. On a Linux desktop, run under `nice -n 19`. After dependencies and models are cached, set `UV_OFFLINE=1` and `MODELSCOPE_OFFLINE=1` to run disconnected.
+
+Run local transcription after recording downloads finish, with only one writer using the workspace. It decodes audio into RAM in roughly five-minute chunks, cutting at quiet points near boundaries, and checkpoints timed rows in `.cache/local-asr.json`. Repeat the same command to resume. The checkpoint binds the recording, model contents, hotwords and runtime options; changing them requires an explicit `--overwrite` restart. Only a completed run publishes `.cache/transcript.tsv` and `字幕.txt`; all transcript commands use these same files for either engine. Existing transcripts are kept. For a local course workflow, use `download C --classroom --slides` followed by `transcribe C --engine local` instead of `download --transcribe`, which continues to use BCut. Follow the user's authorization for downloads, uploads and video edits.
 
 `replace` applies the pairs in order to every transcript, prints the hits, and rewrites `字幕.txt`; check a wrong form that is also a real word with `query -m` first. `embed` replaces each recording with a copy whose only subtitle track is the transcript, or the .srt or .vtt `--file` given, without re-encoding, and skips recordings that already carry the current transcript.
 
-`query` prints the segments of the BCut transcript, or of the fast transcript with `--fast-transcript`, as `[00:02:30] text` lines. `-m`/`--match` keeps those matching a regular expression in any case, so one call covers alternatives such as `点名|签到|考勤`. Each lecture with matches starts with a line naming it, and each run of segments follows the slide then on screen, such as `slides/008.jpg`; with no match, it says how many lectures it searched.
+`query` prints the segments of the completed transcript (BCut or local), or of the fast transcript with `--fast-transcript`, as `[00:02:30] text` lines. `-m`/`--match` keeps those matching a regular expression in any case, so one call covers alternatives such as `点名|签到|考勤`. Each lecture with matches starts with a line naming it, and each run of segments follows the slide then on screen, such as `slides/008.jpg`; with no match, it says how many lectures it searched.
 
 ### Slides and frames
 

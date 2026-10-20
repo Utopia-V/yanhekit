@@ -35,6 +35,20 @@ npx skills add windlandneko/yanhekit -g -s '*'
 - `yhkt-ppt <课程> [课次]`：从屏幕录像提取 PPT，整理成去重后的课件 PDF。
 - `yhkt-review <课程> [范围]`：根据笔记写复习提纲和自测题。
 
+## 本机转录（可选）
+
+`transcribe` 默认使用 BCut。需要音频留在本机时，可以在工作区单独选择本地引擎，将下面的脚本路径换成安装位置：
+
+```bash
+uv run /path/to/skills/yanhekit/scripts/yanhekit.py transcribe "课程/课次" --engine local --hotwords ./术语.txt
+```
+
+本地引擎使用 FunASR 的 SeACo-Paraformer-large、FSMN VAD 和标点模型，面向普通话与中英混合课堂。`术语.txt` 是 UTF-8 文本，每行一个词或短语，例如 `马尔可夫决策过程`、`UCB`、`Q 学习`；不需要热词时省略 `--hotwords`。热词只是识别提示，术语和公式仍需核对。
+
+首次运行由 uv 为独立的 `local_asr.py` 安装依赖，并从 ModelScope 下载模型；推理在本机进行，音频和转录文本留在本机。主脚本的依赖不包含 PyTorch。GPU 路径使用 PyTorch 的 CUDA 12.8 运行时，需要兼容的 NVIDIA 驱动；也可以用 `--device cpu`。Linux 桌面上建议加 `nice -n 19`，默认每批处理 60 秒音频，可用 `--batch-seconds 30` 减小批次。PyTorch 分配器上限为 18 GiB，CUDA 库和桌面显示另占显存。依赖和模型缓存齐备后，可设置 `UV_OFFLINE=1 MODELSCOPE_OFFLINE=1` 离线运行。
+
+本地引擎逐课次运行，每约五分钟保存一次 `.cache/local-asr.json` 转录检查点，音频只在内存中解码。中断后重复相同命令即可续跑；更换录播、模型、热词或推理选项会拒绝复用旧检查点，需要显式 `--overwrite` 重新转录。完成后生成同样的 `.cache/transcript.tsv` 和 `字幕.txt`，普通 `query`、`replace` 与 `embed` 可以直接使用；已有字幕默认保留。`download --transcribe` 仍使用 BCut，本机转录应在下载完成后单独运行。模型使用受其各自许可证约束。
+
 ## 技术细节
 
 - **登录**：依次尝试保存的登录态、统一身份认证的会话和钥匙串中的密码，都失效时才弹出本地网页完成登录和二次验证，Agent 不会读到密码。登录态保存在 `~/.config/yanhekit/`，密码默认在系统钥匙串。
@@ -48,7 +62,7 @@ npx skills add windlandneko/yanhekit -g -s '*'
 
 - **用途**：本工具包仅供个人学习和研究使用，不得用于商业或非法用途。
 - **课程内容**：录播涉及老师和同学的隐私与版权，下载和使用时请遵守法律法规和学校规定，不要传播给未经授权的第三方，也不要在其他平台公开分享。
-- **转录**：BCut 转录会把提取的音频上传到 Bilibili 的服务，请确保你有权使用这些音频，结果仅供参考：转录可能存在不少错误，漏掉的作业和知识点别怪我喵。
+- **转录**：默认的 BCut 转录会把提取的音频上传到 Bilibili 的服务，`--engine local` 在本机转录。请确保你有权使用这些音频，结果仅供参考：转录可能存在不少错误，漏掉的作业和知识点别怪我喵。
 
 ## 鸣谢
 

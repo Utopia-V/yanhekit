@@ -221,7 +221,7 @@ def recordings(lecture):
 
 
 def timeline(lecture, source):
-  """The timed text of the BCut transcript, or of the platform's rougher fast transcript."""
+  """The timed text of the completed transcript, or of the platform's rougher fast transcript."""
   return lecture / '.cache' / f'{source}.tsv'
 
 

@@ -18,7 +18,9 @@
 
 import argparse
 import math
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -151,7 +153,15 @@ def parse():
   empty = commands.add_parser('drop', help='Delete empty lectures and mark them dropped in course.json')
   empty.add_argument('lectures', nargs='+', type=absolute, help='Lecture folders')
 
-  asr = commands.add_parser('transcribe', parents=[targets], help='Transcribe with BCut into 字幕.txt')
+  asr = commands.add_parser('transcribe', parents=[targets], help='Transcribe into 字幕.txt (default: BCut)')
+  asr.add_argument(
+    '--engine', choices=('bcut', 'local'), default='bcut', help='BCut upload or optional local inference'
+  )
+  asr.add_argument('--hotwords', type=absolute, metavar='FILE', help='Local ASR: UTF-8 file, one phrase per line')
+  asr.add_argument('--device', choices=('cuda', 'cpu'), default='cuda', help='Local ASR device (default: cuda)')
+  asr.add_argument(
+    '--batch-seconds', type=positive, default=60, metavar='N', help='Local ASR audio per batch (default: 60)'
+  )
   asr.add_argument('--overwrite', action='store_true', help='Extract and transcribe again')
   fix = commands.add_parser('replace', parents=[targets], help='Fix recurring transcript errors')
   fix.add_argument('-r', dest='pairs', nargs=2, action='append', required=True, metavar=('WRONG', 'RIGHT'))
@@ -241,6 +251,25 @@ def main():
 
   elif args.command == 'transcribe':
     found = having(args, recordings, 'No recordings; run `download --classroom` first')
+    if args.engine == 'local':
+      worker = Path(__file__).with_name('local_asr.py')
+      command = [
+        'uv',
+        'run',
+        str(worker),
+        *map(str, found),
+        '--device',
+        args.device,
+        '--batch-seconds',
+        str(args.batch_seconds),
+      ]
+      if args.hotwords:
+        command += ['--hotwords', str(args.hotwords)]
+      if args.overwrite:
+        command.append('--overwrite')
+      raise SystemExit(subprocess.run(command, check=False, env={**os.environ, 'PYTHONUTF8': '1'}).returncode)
+    if args.hotwords or args.device != 'cuda' or args.batch_seconds != 60:
+      raise ValueError('--hotwords, --device and --batch-seconds require --engine local')
     failed = transcribe.transcribe(found, args.overwrite)
     if failed:
       raise SystemExit(f'{count(failed, "recording")} failed')
