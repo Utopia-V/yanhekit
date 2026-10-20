@@ -18,6 +18,8 @@ npx skills add windlandneko/yanhekit -g -s '*'
 
 或把 `skills/` 下的各个文件夹复制到所用 Harness 的技能目录：Claude Code 是 `~/.claude/skills`，Codex 是 `~/.agents/skills`，DeepSeek Harness 是 `~/.dsh/skills`。
 
+已有 `uv` 可以直接使用，也可以在命令中写它的完整路径。ffmpeg 默认由 `imageio-ffmpeg` 随依赖提供；要使用自己安装的版本，可在运行前设置 `IMAGEIO_FFMPEG_EXE`，例如 Linux 上的 `IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg uv run <脚本路径> ...`。自带 ffmpeg 若被信号终止，会提示并用 `PATH` 中另一个 ffmpeg 重试一次；普通命令错误和自选版本的错误仍直接报告。
+
 ## 使用
 
 新建一个工作区，直接与 Agent 对话，就可以通过本插件检索材料、整理笔记和PPT、解答课程问题和帮助你期末复习了。以后只需打开同一个工作区即可，不同课程和课次的材料会自动归类整理，可以直接点开文件夹翻阅文档和观看录播。

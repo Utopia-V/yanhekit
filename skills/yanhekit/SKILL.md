@@ -139,6 +139,14 @@ To install Yanhekit from its repository, fetch https://github.com/windlandneko/y
 
 Then tell the user to start a new session so that the harness loads the skills.
 
+Use an existing `uv` installation when available; all commands accept its absolute executable path in place of `uv`. The script uses the ffmpeg bundled by `imageio-ffmpeg` by default, so a separate ffmpeg install is optional. To use an installed or custom ffmpeg, set `IMAGEIO_FFMPEG_EXE` to its executable path; the setting applies to downloads, audio extraction, slides, frames and subtitle embedding. On Linux or macOS, for example:
+
+```sh
+IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg /path/to/uv run <yanhekit> download <target> --classroom
+```
+
+In PowerShell, set `$env:IMAGEIO_FFMPEG_EXE = 'C:\path\to\ffmpeg.exe'` before running the command. If the bundled binary terminates with a signal, the script prints one notice and retries the same operation once with a different `ffmpeg` found on `PATH`. Ordinary command errors and failures of a custom binary are reported directly; without an alternative, the original failure is reported.
+
 `uv` fetches Python and the script's dependencies on its first run. When the shell does not find `uv`, tell the user and, once they agree, install it with the first of these that works:
 
 1. The official installer: `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS and Linux, or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` on Windows. It places `uv` in `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows; call it by that path while the current shell does not find it.

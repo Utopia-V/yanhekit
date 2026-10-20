@@ -9,8 +9,9 @@ import subprocess
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
-from imageio_ffmpeg import get_ffmpeg_exe
+import imageio_ffmpeg
 
 VIEWS = {'classroom': '教室', 'screen': '屏幕'}
 
@@ -28,8 +29,20 @@ def replacing(path):
 
 
 def ffmpeg(*args, **kwargs):
-  """Run the ffmpeg build that the imageio-ffmpeg package bundles."""
-  return subprocess.run([get_ffmpeg_exe(), '-v', 'error', '-y', *args], check=True, **kwargs)
+  """Use imageio-ffmpeg's selector; retry a bundled signal crash once with a different PATH binary."""
+  executable = imageio_ffmpeg.get_ffmpeg_exe()
+  command = [executable, '-v', 'error', '-y', *args]
+  try:
+    return subprocess.run(command, check=True, **kwargs)
+  except subprocess.CalledProcessError as error:
+    bundled = Path(imageio_ffmpeg.__file__).resolve().parent / 'binaries'
+    if error.returncode >= 0 or Path(executable).resolve().parent != bundled:
+      raise
+    fallback = shutil.which('ffmpeg')
+    if not fallback or Path(fallback).resolve() == Path(executable).resolve():
+      raise
+    log(None, f'ffmpeg: bundled binary terminated by signal {-error.returncode}; retrying {fallback}')
+    return subprocess.run([fallback, *command[1:]], check=True, **kwargs)
 
 
 def read_json(path, default):
