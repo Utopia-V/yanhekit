@@ -20,7 +20,7 @@ def read_hotwords(path):
 
 
 def decode(video, offset):
-  """Decode at most five minutes into RAM, leaving the recording and workspace untouched."""
+  """Decode five minutes into RAM with the shared ffmpeg selector (including IMAGEIO_FFMPEG_EXE)."""
   result = ffmpeg(
     '-ss', f'{offset:.6f}', '-i', video, '-t', str(CHUNK_SECONDS), '-vn', '-ac', '1', '-ar', str(SAMPLE_RATE),
     '-f', 'f32le', 'pipe:1', stdout=subprocess.PIPE,
@@ -79,7 +79,7 @@ def transcribe_lecture(lecture, recognize, config, overwrite=False):
     raise ValueError(f'{lecture}: recording download is unfinished; wait for `download` to complete')
   stat = video.stat()
   signature = {
-    'format': 1,
+    'format': 2,
     'recording': video.name,
     'size': stat.st_size,
     'mtime_ns': stat.st_mtime_ns,
@@ -102,13 +102,12 @@ def transcribe_lecture(lecture, recognize, config, overwrite=False):
       if not len(audio):
         state['complete'] = True
       else:
-        final = len(audio) < CHUNK_SECONDS * SAMPLE_RATE
-        if not final:
-          audio = quiet_cut(audio)
+        # Resampling can return slightly less than the requested duration before EOF.
+        # Only a subsequent empty decode establishes completion.
+        audio = quiet_cut(audio)
         rows = checked_rows(recognize(audio), offset, len(audio) / SAMPLE_RATE)
         state['rows'].extend(rows)
         state['samples'] += len(audio)
-        state['complete'] = final
       current = video.stat()
       if (current.st_size, current.st_mtime_ns) != (stat.st_size, stat.st_mtime_ns):
         raise ValueError(f'{lecture}: recording changed during local transcription')

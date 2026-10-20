@@ -45,7 +45,7 @@ uv run /path/to/skills/yanhekit/scripts/yanhekit.py transcribe "课程/课次" -
 
 本地引擎使用 FunASR 的 SeACo-Paraformer-large、FSMN VAD 和标点模型，面向普通话与中英混合课堂。`术语.txt` 是 UTF-8 文本，每行一个词或短语，例如 `马尔可夫决策过程`、`UCB`、`Q 学习`；不需要热词时省略 `--hotwords`。热词只是识别提示，术语和公式仍需核对。
 
-首次运行由 uv 为独立的 `local_asr.py` 安装依赖，并从 ModelScope 下载模型；推理在本机进行，音频和转录文本留在本机。主脚本的依赖不包含 PyTorch。GPU 路径使用 PyTorch 的 CUDA 12.8 运行时，需要兼容的 NVIDIA 驱动；也可以用 `--device cpu`。Linux 桌面上建议加 `nice -n 19`，默认每批处理 60 秒音频，可用 `--batch-seconds 30` 减小批次。PyTorch 分配器上限为 18 GiB，CUDA 库和桌面显示另占显存。依赖和模型缓存齐备后，可设置 `UV_OFFLINE=1 MODELSCOPE_OFFLINE=1` 离线运行。
+首次运行由 uv 为独立的 `local_asr.py` 安装依赖，并从 ModelScope 下载模型；推理在本机进行，音频和转录文本留在本机。主脚本的依赖不包含 PyTorch。GPU 路径使用 PyTorch 的 CUDA 12.8 运行时，需要兼容的 NVIDIA 驱动；也可以用 `--device cpu`。Linux 桌面上建议加 `nice -n 19`，默认每批处理 60 秒音频，可用 `--batch-seconds 30` 减小批次。PyTorch 分配器上限为 18 GiB，CUDA 库和桌面显示另占显存。音频解码遵循 `IMAGEIO_FFMPEG_EXE`，例如在命令前加 `IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg` 使用已安装的 ffmpeg。依赖和模型缓存齐备后，可设置 `UV_OFFLINE=1 MODELSCOPE_OFFLINE=1` 离线运行。
 
 本地引擎逐课次运行，每约五分钟保存一次 `.cache/local-asr.json` 转录检查点，音频只在内存中解码。中断后重复相同命令即可续跑；更换录播、模型、热词或推理选项会拒绝复用旧检查点，需要显式 `--overwrite` 重新转录。完成后生成同样的 `.cache/transcript.tsv` 和 `字幕.txt`，普通 `query`、`replace` 与 `embed` 可以直接使用；已有字幕默认保留。`download --transcribe` 仍使用 BCut，本机转录应在下载完成后单独运行。模型使用受其各自许可证约束。
 

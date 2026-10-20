@@ -1,10 +1,12 @@
 """Local ASR's storage and resume contract, without model downloads or a GPU."""
 
+import os
 import re
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills' / 'yanhekit' / 'scripts'))
@@ -27,8 +29,20 @@ class LocalTranscribeTests(unittest.TestCase):
     self.config = {'engine': 'test', 'hotwords': ['Q 学习']}
 
   def run_lecture(self, recognize, audio, **kwargs):
-    with patch.object(local, 'decode', side_effect=audio), patch.object(local, 'log'):
+    with patch.object(local, 'decode', side_effect=[*audio, np.zeros(0)]), patch.object(local, 'log'):
       local.transcribe_lecture(self.lecture, recognize, self.config, **kwargs)
+
+  def test_decode_honors_ffmpeg_environment(self):
+    samples = np.array([0.25, -0.5], dtype='<f4')
+    with (
+      patch.dict(os.environ, {'IMAGEIO_FFMPEG_EXE': '/chosen/ffmpeg'}),
+      patch('workspace.subprocess.run', return_value=SimpleNamespace(stdout=samples.tobytes())) as run,
+    ):
+      decoded = local.decode(self.video, 123.5)
+    command = run.call_args.args[0]
+    self.assertEqual(command[0], '/chosen/ffmpeg')
+    self.assertEqual(command[command.index('-ss') + 1], '123.500000')
+    np.testing.assert_array_equal(decoded, samples)
 
   def test_hotwords(self):
     path = Path(self.temp.name) / 'terms.txt'
@@ -74,15 +88,26 @@ class LocalTranscribeTests(unittest.TestCase):
         self.run_lecture(lambda _: [(0, 0.5, 'first')], [np.zeros(local.SAMPLE_RATE), RuntimeError('interrupted')])
       self.assertFalse(timeline(self.lecture, 'transcript').exists())
       with (
-        patch.object(local, 'decode', return_value=np.zeros(local.SAMPLE_RATE // 2)) as decode,
+        patch.object(local, 'decode', side_effect=[np.zeros(local.SAMPLE_RATE // 2), np.zeros(0)]) as decode,
         patch.object(local, 'log'),
       ):
         local.transcribe_lecture(self.lecture, lambda _: [(0, 0.4, 'second')], self.config)
-      self.assertEqual(decode.call_args.args[1], 1)
+      self.assertEqual(decode.call_args_list[0].args[1], 1)
+      self.assertEqual(decode.call_args_list[1].args[1], 1.5)
     self.assertEqual(read_tsv(timeline(self.lecture, 'transcript')), [(0, 0.5, 'first'), (1, 1.4, 'second')])
     state = read_json(self.lecture / '.cache' / 'local-asr.json', None)
     self.assertTrue(state['complete'])
     self.assertEqual(state['samples'], local.SAMPLE_RATE * 1.5)
+
+  def test_short_decode_is_not_eof(self):
+    self.run_lecture(
+      lambda _: [(0, 0.4, 'speech')], [np.zeros(local.SAMPLE_RATE - 1), np.zeros(local.SAMPLE_RATE // 2)]
+    )
+    state = read_json(self.lecture / '.cache' / 'local-asr.json', None)
+    self.assertTrue(state['complete'])
+    self.assertEqual(state['samples'], local.SAMPLE_RATE * 1.5 - 1)
+    self.assertEqual(len(state['rows']), 2)
+    self.assertAlmostEqual(state['rows'][1][0], (local.SAMPLE_RATE - 1) / local.SAMPLE_RATE)
 
   def test_existing_transcript_skips_model_and_repairs_text(self):
     self.run_lecture(lambda _: [(0, 0.5, 'kept')], [np.zeros(local.SAMPLE_RATE)])
